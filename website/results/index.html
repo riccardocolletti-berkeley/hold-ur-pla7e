@@ -32,7 +32,7 @@
       <p class="eyebrow">Benchmark across the DR envelope</p>
       <h1>Domain randomisation</h1>
       <p class="lead">
-        The residual policy of <a href="rl.html">§ 1</a> is benchmarked against the
+        The residual policy of <a href="/rl/">§ 1</a> is benchmarked against the
         deployed PID across nine simulation conditions: a nominal baseline that
         matches the calibrated lab setup, plus eight perturbations that each push a
         single physical parameter outside the tuning window (weaker or stronger
@@ -55,7 +55,7 @@
       timesteps, collected from $16$ parallel MuJoCo environments. The reward
       climbs from near zero to roughly $200$ and plateaus once the linear
       learning-rate schedule of the
-      <a href="rl.html#sec-training">training algorithm (§ 6 of the Residual PPO
+      <a href="/rl/#sec-training">training algorithm (§ 6 of the Residual PPO
       page)</a> has decayed.
     </p>
     <figure class="fig">
@@ -71,8 +71,8 @@
 
     <h3 class="section-h"><span class="section-num">§ 2</span>Benchmark protocol</h3>
     <p>
-      The PID of the <a href="control.html">PID page</a> and the trained Residual
-      PPO policy of the <a href="rl.html">Residual PPO page</a> are evaluated on
+      The PID of the <a href="/control/">PID page</a> and the trained Residual
+      PPO policy of the <a href="/rl/">Residual PPO page</a> are evaluated on
       eight perturbed simulation domains plus the nominal one. Each (domain,
       policy) cell is run for $30$ episodes with fixed per-episode seeds shared
       across policies, so the two controllers see the same random domain
@@ -188,7 +188,7 @@
       <dt>RMSE</dt><dd>root-mean-square error.</dd>
       <dt>Drop rate</dt><dd>fraction of episodes in which the ball leaves the plate before the $600$-step horizon expires.</dd>
       <dt>Nominal domain</dt><dd>simulation with the mean values of the randomisation ranges and no perturbation.</dd>
-      <dt>DR</dt><dd>domain randomisation (see <a href="rl.html#sec-dr">§ 5 of the Residual PPO page</a>).</dd>
+      <dt>DR</dt><dd>domain randomisation (see <a href="/rl/#sec-dr">§ 5 of the Residual PPO page</a>).</dd>
     </dl>
 
     </div>

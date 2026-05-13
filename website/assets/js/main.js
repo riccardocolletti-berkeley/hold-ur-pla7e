@@ -4,9 +4,8 @@
 // across every page. Works on file://, local servers, and GitHub Pages.
 // =============================================================
 (function injectLayout() {
-  var inPages = /\/pages\//.test(window.location.pathname);
-  var H = inPages ? '../' : '';        // prefix for home (index.html)
-  var P = inPages ? '' : 'pages/';     // prefix for sibling pages
+  // Absolute paths under the site root. Works because each subpage lives at
+  // /<slug>/index.html (e.g. /control/), so prefixes are no longer needed.
 
   // Small line icons for the mobile drawer. Hidden on desktop via CSS so
   // the inline nav stays text-only as before.
@@ -31,7 +30,7 @@
   var navHTML =
     '<nav class="nav">' +
       '<div class="nav-inner">' +
-        '<a href="' + H + 'index.html" class="brand">' +
+        '<a href="/" class="brand">' +
           '<span class="dot"></span>' +
           '<span>Hold <span class="brand-acc">UR</span> Pla<span class="brand-acc">7</span>e</span>' +
         '</a>' +
@@ -41,22 +40,22 @@
           '<span class="nav-toggle-bar"></span>' +
         '</button>' +
         '<ul id="nav-links" class="nav-links">' +
-          '<li><a href="' + H + 'index.html" data-nav="home">' + ic(ICONS.home) + 'Home</a></li>' +
-          '<li><a href="' + P + 'setup.html" data-nav="setup">' + ic(ICONS.setup) + 'Setup</a></li>' +
-          '<li><a href="' + P + 'physics.html" data-nav="physics">' + ic(ICONS.physics) + 'Physics</a></li>' +
-          '<li><a href="' + P + 'vision.html" data-nav="vision">' + ic(ICONS.vision) + 'Vision</a></li>' +
+          '<li><a href="/" data-nav="home">' + ic(ICONS.home) + 'Home</a></li>' +
+          '<li><a href="/setup/" data-nav="setup">' + ic(ICONS.setup) + 'Setup</a></li>' +
+          '<li><a href="/physics/" data-nav="physics">' + ic(ICONS.physics) + 'Physics</a></li>' +
+          '<li><a href="/vision/" data-nav="vision">' + ic(ICONS.vision) + 'Vision</a></li>' +
           '<li class="nav-dropdown">' +
             '<span class="nav-dropdown-label">' + ic(ICONS.control) + 'Control <span class="nav-caret">▾</span></span>' +
             '<ul class="nav-dropdown-menu">' +
-              '<li><a href="' + P + 'control.html" data-nav="control">' + ic(ICONS.pid) + 'PID</a></li>' +
-              '<li><a href="' + P + 'mpc.html" data-nav="mpc">' + ic(ICONS.mpc) + 'MPC</a></li>' +
-              '<li><a href="' + P + 'rl.html" data-nav="rl">' + ic(ICONS.rl) + 'Residual PPO</a></li>' +
-              '<li><a href="' + P + 'results.html" data-nav="results">' + ic(ICONS.results) + 'Domain randomisation</a></li>' +
+              '<li><a href="/control/" data-nav="control">' + ic(ICONS.pid) + 'PID</a></li>' +
+              '<li><a href="/mpc/" data-nav="mpc">' + ic(ICONS.mpc) + 'MPC</a></li>' +
+              '<li><a href="/rl/" data-nav="rl">' + ic(ICONS.rl) + 'Residual PPO</a></li>' +
+              '<li><a href="/results/" data-nav="results">' + ic(ICONS.results) + 'Domain randomisation</a></li>' +
             '</ul>' +
           '</li>' +
-          '<li><a href="' + P + 'ros.html" data-nav="ros">' + ic(ICONS.ros) + 'ROS</a></li>' +
-          '<li><a href="' + P + 'sim2real.html" data-nav="sim2real">' + ic(ICONS.sim2real) + 'Sim2Real</a></li>' +
-          '<li><a href="' + P + 'team.html" data-nav="team">' + ic(ICONS.team) + 'Code</a></li>' +
+          '<li><a href="/ros/" data-nav="ros">' + ic(ICONS.ros) + 'ROS</a></li>' +
+          '<li><a href="/sim2real/" data-nav="sim2real">' + ic(ICONS.sim2real) + 'Sim2Real</a></li>' +
+          '<li><a href="/team/" data-nav="team">' + ic(ICONS.team) + 'Code</a></li>' +
         '</ul>' +
         '<div class="nav-backdrop" aria-hidden="true"></div>' +
       '</div>' +
@@ -83,12 +82,12 @@
       '<div class="container">' +
         '<div class="footer-grid">' +
           '<div class="footer-brand-col">' +
-            '<a href="' + H + 'index.html" class="footer-logo">' +
+            '<a href="/" class="footer-logo">' +
               '<span class="dot"></span>' +
               '<span>Hold <span class="brand-acc">UR</span> Pla<span class="brand-acc">7</span>e</span>' +
             '</a>' +
             '<p class="footer-tagline">A ping-pong ball balanced on a tilted plate held by a UR7e arm. PID, MPC, and a learned residual.</p>' +
-            '<a class="footer-gh-cta" href="#" target="_blank" rel="noopener">' +
+            '<a class="footer-gh-cta" href="https://github.com/riccardocolletti-berkeley/hold-ur-pla7e" target="_blank" rel="noopener">' +
               '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + ghPath + '"/></svg>' +
               'Source on GitHub' +
             '</a>' +
@@ -96,26 +95,26 @@
           '<div class="footer-col">' +
             '<h5>Theory</h5>' +
             '<ul>' +
-              '<li><a href="' + P + 'setup.html">Setup</a></li>' +
-              '<li><a href="' + P + 'physics.html">Physics</a></li>' +
-              '<li><a href="' + P + 'vision.html">Vision</a></li>' +
+              '<li><a href="/setup/">Setup</a></li>' +
+              '<li><a href="/physics/">Physics</a></li>' +
+              '<li><a href="/vision/">Vision</a></li>' +
             '</ul>' +
           '</div>' +
           '<div class="footer-col">' +
             '<h5>Control</h5>' +
             '<ul>' +
-              '<li><a href="' + P + 'control.html">PID</a></li>' +
-              '<li><a href="' + P + 'mpc.html">MPC</a></li>' +
-              '<li><a href="' + P + 'rl.html">Residual PPO</a></li>' +
-              '<li><a href="' + P + 'results.html">Domain randomisation</a></li>' +
+              '<li><a href="/control/">PID</a></li>' +
+              '<li><a href="/mpc/">MPC</a></li>' +
+              '<li><a href="/rl/">Residual PPO</a></li>' +
+              '<li><a href="/results/">Domain randomisation</a></li>' +
             '</ul>' +
           '</div>' +
           '<div class="footer-col">' +
             '<h5>System</h5>' +
             '<ul>' +
-              '<li><a href="' + P + 'ros.html">ROS 2</a></li>' +
-              '<li><a href="' + P + 'sim2real.html">Sim2Real</a></li>' +
-              '<li><a href="' + P + 'team.html">Code</a></li>' +
+              '<li><a href="/ros/">ROS 2</a></li>' +
+              '<li><a href="/sim2real/">Sim2Real</a></li>' +
+              '<li><a href="/team/">Code</a></li>' +
             '</ul>' +
           '</div>' +
         '</div>' +
@@ -141,11 +140,12 @@
   inject('site-nav', navHTML);
   inject('site-footer', footerHTML);
 
-  // Highlight the active nav item by URL slug
+  // Highlight the active nav item by URL slug. Pages live at /<slug>/ or
+  // /<slug>/index.html; the root and bare /index.html count as home.
   var path = window.location.pathname;
   var slug;
-  if (/index\.html$|\/$/.test(path) || path === '') slug = 'home';
-  else slug = path.replace(/^.*\//, '').replace(/\.html$/, '');
+  if (path === '/' || /\/index\.html$/.test(path)) slug = 'home';
+  else slug = path.replace(/\/$/, '').replace(/^.*\//, '').replace(/\.html$/, '');
   document.querySelectorAll('[data-nav]').forEach(function (a) {
     if (a.dataset.nav === slug) a.classList.add('active');
   });

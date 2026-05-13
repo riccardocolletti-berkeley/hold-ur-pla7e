@@ -25,7 +25,7 @@
       <h1>Residual PPO controller</h1>
       <p class="lead">
         A bounded neural correction trained with Proximal Policy Optimization,
-        summed on top of the deployed <a href="control.html">PID</a> command so
+        summed on top of the deployed <a href="/control/">PID</a> command so
         that it fine-tunes the baseline without replacing it. Training is
         performed in MuJoCo with seven physical and sensing parameters randomised
         per episode.
@@ -37,7 +37,7 @@
 
     <h3 class="section-h"><span class="section-num">§ 1</span>Motivation</h3>
     <p>
-      The hand-tuned <a href="control.html">PID</a> of <a href="control.html#sec-law">§ 2</a>
+      The hand-tuned <a href="/control/">PID</a> of <a href="/control/#sec-law">§ 2</a>
       is reliable inside the operating envelope it was tuned for: nominal ball mass,
       nominal plate friction, low sensing noise, low actuation latency. Outside that
       envelope its fixed gains $(K_p, K_i, K_d)$ no longer match the closed-loop
@@ -261,7 +261,7 @@
         <path d="M 620 230 V 280 H 37 V 192" fill="none" stroke="#888" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#bA1)"/>
         <text x="350" y="298" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#888">ball state recovered by the vision pipeline closes the loop</text>
       </svg>
-      <figcaption><span class="fig-num">Figure 1.</span> Closed-loop action. The PID baseline reads the tracking errors $(e_p, e_v)$ and emits the bulk of the tilt command through its three gains $K_p, K_i, K_d$. In parallel, the policy network $\pi_\theta$ reads the 12-dimensional observation $o_t$ and emits a bounded residual $a_t \in [-1, 1]^2$, scaled by $\alpha$ before being summed. The combined command $(u_x, u_y)$ is forwarded to the wiring stage of the <a href="control.html#sec-wiring">PID page (§ 3)</a>, then to the IK and the arm; the plant feeds the vision pipeline, which closes the loop.</figcaption>
+      <figcaption><span class="fig-num">Figure 1.</span> Closed-loop action. The PID baseline reads the tracking errors $(e_p, e_v)$ and emits the bulk of the tilt command through its three gains $K_p, K_i, K_d$. In parallel, the policy network $\pi_\theta$ reads the 12-dimensional observation $o_t$ and emits a bounded residual $a_t \in [-1, 1]^2$, scaled by $\alpha$ before being summed. The combined command $(u_x, u_y)$ is forwarded to the wiring stage of the <a href="/control/#sec-wiring">PID page (§ 3)</a>, then to the IK and the arm; the plant feeds the vision pipeline, which closes the loop.</figcaption>
     </figure>
 
     <p>
@@ -566,7 +566,7 @@
       Stable-Baselines 3 vectorised wrapper. The learning rate decays linearly from
       $10^{-4}$ to $10^{-5}$ and the entropy coefficient from $5 \cdot 10^{-3}$ to
       $5 \cdot 10^{-4}$ over the full training schedule. The training curve and the
-      benchmark are reported on the <a href="results.html">results page</a>.
+      benchmark are reported on the <a href="/results/">results page</a>.
     </p>
 
     <figure class="fig reveal-scale">

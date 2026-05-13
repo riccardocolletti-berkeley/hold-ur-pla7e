@@ -30,7 +30,7 @@
           <h1>Ball-on-plate control with a <span class="accent">UR7e arm</span></h1>
           <div class="hero-deck stagger">
 
-            <a href="pages/setup.html" class="hd-card">
+            <a href="/setup/" class="hd-card">
               <div class="hd-head">
                 <span class="hd-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -46,7 +46,7 @@
               <p class="hd-text">A $40$ mm ping-pong ball is balanced on a $45.7$ cm acrylic plate held by a Universal Robots UR7e arm.</p>
             </a>
 
-            <a href="pages/vision.html" class="hd-card">
+            <a href="/vision/" class="hd-card">
               <div class="hd-head">
                 <span class="hd-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -60,7 +60,7 @@
               <p class="hd-text">An overhead Intel RealSense D435i camera tracks the ball; four ArUco fiducial markers at the plate corners define a metric reference from image pixels to plate coordinates.</p>
             </a>
 
-            <a href="pages/control.html" class="hd-card">
+            <a href="/control/" class="hd-card">
               <div class="hd-head">
                 <span class="hd-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -72,7 +72,7 @@
               <p class="hd-text">The position-error signal in the plate frame is mapped to a target plate tilt by a position-level controller, and then to a small wrist-joint increment via the rotational Jacobian of the arm.</p>
             </a>
 
-            <a href="pages/ros.html" class="hd-card">
+            <a href="/ros/" class="hd-card">
               <div class="hd-head">
                 <span class="hd-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -91,7 +91,7 @@
           <div class="cta-deck">
 
             <!-- PID — feedback equaliser -->
-            <a href="pages/control.html" class="cta-card cta-pid">
+            <a href="/control/" class="cta-card cta-pid">
               <span class="cta-icon">
                 <svg viewBox="0 0 44 44" aria-hidden="true">
                   <g class="cta-eq">
@@ -112,7 +112,7 @@
             </a>
 
             <!-- MPC — horizon with planning dots -->
-            <a href="pages/mpc.html" class="cta-card cta-mpc">
+            <a href="/mpc/" class="cta-card cta-mpc">
               <span class="cta-icon">
                 <svg viewBox="0 0 44 44" aria-hidden="true">
                   <line x1="6" y1="34" x2="38" y2="34" class="axis"/>
@@ -131,7 +131,7 @@
             </a>
 
             <!-- Residual PPO — baseline curve + neural residual on top -->
-            <a href="pages/rl.html" class="cta-card cta-rl">
+            <a href="/rl/" class="cta-card cta-rl">
               <span class="cta-icon">
                 <svg viewBox="0 0 44 44" aria-hidden="true">
                   <path class="rl-base"     d="M 6 26 Q 14 26 22 26 T 38 26" fill="none"/>
@@ -150,7 +150,7 @@
             </a>
 
             <!-- ROS 2 — node graph with a packet flowing along the edges -->
-            <a href="pages/ros.html" class="cta-card cta-ros">
+            <a href="/ros/" class="cta-card cta-ros">
               <span class="cta-icon">
                 <svg viewBox="0 0 44 44" aria-hidden="true">
                   <g class="ros-edges">
@@ -681,7 +681,7 @@
       </p>
 
       <div class="walk-cta reveal">
-        <a href="pages/control.html" class="btn btn-ghost">
+        <a href="/control/" class="btn btn-ghost">
           Full PID detail <span class="arrow">→</span>
         </a>
       </div>
@@ -792,7 +792,7 @@
       </p>
 
       <div class="walk-cta reveal">
-        <a href="pages/mpc.html" class="btn btn-ghost">
+        <a href="/mpc/" class="btn btn-ghost">
           Full MPC detail <span class="arrow">→</span>
         </a>
       </div>
@@ -927,10 +927,10 @@
       </div>
 
       <div class="walk-cta reveal" style="display:flex;justify-content:center;gap:0.6rem;flex-wrap:wrap;">
-        <a href="pages/rl.html" class="btn btn-ghost">
+        <a href="/rl/" class="btn btn-ghost">
           RL detail <span class="arrow">→</span>
         </a>
-        <a href="pages/results.html" class="btn btn-primary">
+        <a href="/results/" class="btn btn-primary">
           Full benchmark <span class="arrow">→</span>
         </a>
       </div>
@@ -998,7 +998,7 @@
               of $R_{WP}(q)$. The wiring formula composes the two scalar tilts into
               a single rotation 3-vector in $\{W\}$. The minus sign follows from
               the rolling-without-slipping equation
-              <a href="pages/physics.html">(derivation)</a>.
+              <a href="/physics/">(derivation)</a>.
             </p>
           </div>
         </div>
@@ -1084,7 +1084,7 @@
       </div>
 
       <div style="text-align:center;margin-top:2.5rem;" class="reveal">
-        <a href="pages/control.html" class="btn btn-ghost">Detailed control walkthrough <span class="arrow">→</span></a>
+        <a href="/control/" class="btn btn-ghost">Detailed control walkthrough <span class="arrow">→</span></a>
       </div>
     </div>
   </section>
@@ -1358,7 +1358,7 @@
         $$\ddot x \;\approx\; \tfrac{5}{7}\, g\, \theta_y, \qquad
           \ddot y \;\approx\; -\tfrac{5}{7}\, g\, \theta_x$$
       </div>
-      <a href="pages/physics.html" class="btn btn-primary reveal" style="margin-top:1rem;">
+      <a href="/physics/" class="btn btn-primary reveal" style="margin-top:1rem;">
         Full derivation <span class="arrow">→</span>
       </a>
     </div>

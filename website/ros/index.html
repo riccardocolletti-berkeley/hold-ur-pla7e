@@ -44,11 +44,11 @@
       loop and exposes the arm through the standard <code>ros2_control</code>
       interfaces; this layer is treated as a black box. Above it sits a
       controller node, either the PID of the
-      <a href="control.html">control page</a> or the MPC of the
-      <a href="mpc.html">MPC page</a>, which reads the latest ball state and
+      <a href="/control/">control page</a> or the MPC of the
+      <a href="/mpc/">MPC page</a>, which reads the latest ball state and
       joint positions at every tick and writes back a joint command. Above
       the controller, a vision node runs the perception pipeline of the
-      <a href="vision.html">vision page</a> and publishes the ball state on a
+      <a href="/vision/">vision page</a> and publishes the ball state on a
       topic that any controller can read.
     </p>
     <p>
@@ -231,7 +231,7 @@
           </span>
           <h4 class="ros-topic">ball_balance_controller &middot; ball_balance_mpc</h4>
           <p class="ros-msg">controller nodes (PID or MPC variant)</p>
-          <p>Two implementations of the same interface: the PID node of the <a href="control.html">PID page</a> and the MPC node of the <a href="mpc.html">MPC page</a>. Exactly one is brought up at a time; both subscribe to <code>/ball_state</code> and <code>/joint_states</code>, query the world-to-plate transform, and emit joint commands.</p>
+          <p>Two implementations of the same interface: the PID node of the <a href="/control/">PID page</a> and the MPC node of the <a href="/mpc/">MPC page</a>. Exactly one is brought up at a time; both subscribe to <code>/ball_state</code> and <code>/joint_states</code>, query the world-to-plate transform, and emit joint commands.</p>
         </div>
 
         <div class="walk-card reveal-scale">
@@ -644,7 +644,7 @@
         <div class="cycle-card pos-4 reveal-scale">
           <span class="cycle-num">4</span>
           <h5>Joint command out</h5>
-          <p>The five-stage pipeline of the <a href="control.html">control page</a> runs and emits a joint command to the UR firmware.</p>
+          <p>The five-stage pipeline of the <a href="/control/">control page</a> runs and emits a joint command to the UR firmware.</p>
         </div>
 
         <div class="cycle-card pos-5 reveal-scale">
