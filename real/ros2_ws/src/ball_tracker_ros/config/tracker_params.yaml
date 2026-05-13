@@ -1,0 +1,38 @@
+# =============================================================================
+# Parameters for the ball-tracker ROS 2 node.
+#
+# The reference trajectory lives in
+# `ball_balance_controller/config/reference.yaml`, shared with the PID
+# and MPC controllers. The launch file loads both files. The tracker
+# uses the reference for two things:
+#   * Its KF gravity-input model (commanded plate tilt to ball acceleration).
+#   * The OpenCV debug overlay that draws the target on the camera frame.
+# =============================================================================
+
+ball_tracker:
+  ros__parameters:
+
+    # ── Camera ────────────────────────────────────────────────────────────────
+    # 960x540 YUYV @ 60 fps is the highest mode /dev/video4 (RealSense color)
+    # exposes.
+    camera_index:  4
+    camera_width:  960
+    camera_height: 540
+    camera_fps:    60
+
+    # ── Debug / calibration ───────────────────────────────────────────────────
+    show_debug:        true
+    calibration_file:  ""    # empty: no undistortion; otherwise an .npz path
+
+    # ── /plate_cmd subscription (KF gravity input) ────────────────────────────
+    # When true, the KF predict step adds (5/7)·g·sin(θ) using the
+    # controller's commanded tilt. Disabled by default: the real ball is
+    # held by static friction below the slip threshold, so the KF predicts
+    # forward motion that doesn't happen and biases vx/vy opposite to the
+    # command. Off: KF is a constant-velocity smoother on position alone.
+    use_plate_cmd:        false
+    plate_cmd_timeout_s:  0.30   # drop control input older than this
+
+    # Number of samples drawn along one period of the reference path in the
+    # debug-window overlay.
+    reference_overlay_samples: 240

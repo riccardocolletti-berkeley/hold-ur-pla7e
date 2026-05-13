@@ -1,0 +1,44 @@
+# =============================================================================
+# Vision-side runtime configuration: camera, ArUco markers, HSV ball
+# detection, and Kalman noise. Plate / ball / physics constants are NOT
+# set here; they come from `ball_on_plate/config/hardware.yaml` (loaded
+# in `vision/config.py`). All distances are SI (metres). The table frame
+# is right-handed with the origin at the table centre, +x to the camera
+# right and +y up in the frame.
+# =============================================================================
+
+camera:
+  index:  4
+  width:  960
+  height: 540
+  # RealSense /dev/video4 supports up to 960x540 YUYV at 60 fps. Higher
+  # resolution gives sub-pixel ArUco corner accuracy that scales linearly
+  # with pixel count, tightening the homography fit.
+  fps:    60
+
+aruco:
+  dictionary: DICT_4X4_50
+  markers:
+    - { id: 0, x: -0.2135, y: -0.2135 }    # bottom-left
+    - { id: 1, x:  0.2135, y: -0.2135 }    # bottom-right
+    - { id: 2, x: -0.2135, y:  0.2135 }    # top-left
+    - { id: 3, x:  0.2135, y:  0.2135 }    # top-right
+
+ball_detection:
+  hsv_lower:     [33,  67,  97]
+  hsv_upper:     [92, 255, 255]
+  min_radius_px:  5
+  max_radius_px: 80
+
+kalman:
+  # Standard deviation of the unmodelled in-plane acceleration. Set high
+  # enough that the KF treats its own acceleration prediction as a soft
+  # prior, not gospel: the control-input gravity term is approximate
+  # (small-angle tilt-to-accel, world / table-frame skew, ~100 ms wrist
+  # actuator lag between commanded and achieved tilt), and on top of that
+  # the ball experiences slip, rolling drag, and bearing noise. With this
+  # value high enough, the KF lets fresh position measurements push the
+  # velocity quickly, which is what the controller's D term needs during
+  # fast rolls.
+  process_noise:     0.5       # [m/s^2]
+  measurement_noise: 0.002     # [m] position measurement std-dev

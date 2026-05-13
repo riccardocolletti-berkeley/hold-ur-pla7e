@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "real-vision"
+version = "0.1.0"
+description = "Real-robot bring-up: standalone overhead-camera ball tracker plus Python deps consumed by the ROS 2 controller."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "ballplate",
+    "numpy>=1.24",
+    "opencv-contrib-python>=4.9",
+    # Pulled in for FK + Jacobian inside ``ball_balance_controller``. The
+    # ament_python package declares it too, but ament_python doesn't
+    # install non-ROS deps; uv has to.
+    "ikpy>=3.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["vision"]
+exclude = [
+    "vision/calibration_files/**",   # machine-specific, populated at runtime
+    "vision/docs/**",                # engineering notes, not runtime data
+]
+
+[tool.uv.sources]
+ballplate = { workspace = true }

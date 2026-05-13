@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/static/assets/berkeley.png">
+  <title>EECS 206A · Trajectory Designer</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+<body>
+
+  <!-- Animated ambient background -->
+  <div class="ambient" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+    <span class="grain"></span>
+  </div>
+
+  <!-- Splash -->
+  <section id="splash" class="screen active">
+    <div class="splash-inner">
+      <div class="splash-ring">
+        <img class="splash-logo" src="/static/assets/berkeley.png" alt="UC Berkeley">
+      </div>
+      <h1 class="splash-title">EECS 206A</h1>
+      <p class="splash-sub">Trajectory Designer</p>
+      <div class="splash-bar"></div>
+      <p class="splash-foot">Introduction to Robotics · Spring 2026</p>
+    </div>
+  </section>
+
+  <!-- Mode select -->
+  <section id="mode" class="screen">
+    <header class="topbar">
+      <img class="brand-logo" src="/static/assets/berkeley.png" alt="">
+      <div class="brand-text">
+        <span class="brand">UC Berkeley · EECS 206A</span>
+        <span class="brand-sub">Ball-on-Plate Lab</span>
+      </div>
+      <div class="backend-toggle" id="backend-toggle" role="tablist" aria-label="Backend">
+        <button class="backend-opt" data-backend="sim" role="tab">Sim</button>
+        <button class="backend-opt" data-backend="real" role="tab">Real</button>
+      </div>
+      <span class="status-pill" id="status-pill">
+        <span class="dot"></span><span class="status-text">Idle</span>
+      </span>
+    </header>
+    <div class="content">
+      <div class="hero">
+        <h2 class="title">Design a trajectory</h2>
+        <p class="subtitle">Sketch any curve. Pick the simulator or the real arm; the same drawing runs on both.</p>
+      </div>
+
+      <div class="mode-cards">
+        <button class="mode-card" data-mode="open">
+          <span class="card-tag">Open</span>
+          <svg class="glyph" viewBox="0 0 100 60" aria-hidden="true">
+            <path d="M5,30 C25,5 45,55 65,30 S95,30 95,30" fill="none" stroke="currentColor"
+                  stroke-width="3" stroke-linecap="round"
+                  stroke-dasharray="200" stroke-dashoffset="200">
+              <animate attributeName="stroke-dashoffset" from="200" to="0" dur="1.6s" begin="0s" fill="freeze"/>
+            </path>
+            <circle cx="5" cy="30" r="4" fill="currentColor"/>
+            <circle cx="95" cy="30" r="4" fill="currentColor"/>
+          </svg>
+          <h3>Open Path</h3>
+          <p>Free curve from A to B. Pick stop, ping-pong, or loop at the end.</p>
+        </button>
+        <button class="mode-card" data-mode="closed">
+          <span class="card-tag">Closed</span>
+          <svg class="glyph" viewBox="0 0 100 60" aria-hidden="true">
+            <ellipse cx="50" cy="30" rx="35" ry="22" fill="none" stroke="currentColor"
+                     stroke-width="3"
+                     stroke-dasharray="200" stroke-dashoffset="200">
+              <animate attributeName="stroke-dashoffset" from="200" to="0" dur="1.6s" begin="0s" fill="freeze"/>
+            </ellipse>
+          </svg>
+          <h3>Closed Loop</h3>
+          <p>Endpoints snap together. Ball loops forever along the curve.</p>
+        </button>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat"><span class="num" id="stat-count">-</span><span class="lbl">Saved</span></div>
+        <div class="stat"><span class="num" id="stat-plate">-</span><span class="lbl">Plate (cm)</span></div>
+        <div class="stat"><span class="num" id="stat-ball">-</span><span class="lbl">Ball diameter (mm)</span></div>
+      </div>
+    </div>
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-view="mode"><span class="ico">✎</span>Draw</button>
+      <button class="nav-btn" data-view="gallery"><span class="ico">▤</span>Gallery</button>
+      <button class="nav-btn" data-view="training"><span class="ico">▲</span>Training</button>
+    </nav>
+  </section>
+
+  <!-- Draw -->
+  <section id="draw" class="screen">
+    <header class="topbar">
+      <button class="back" data-back="mode" aria-label="Back">‹</button>
+      <img class="brand-logo small" src="/static/assets/berkeley.png" alt="">
+      <span class="brand" id="draw-mode-label">Open Path</span>
+    </header>
+    <div class="content draw-content">
+      <div class="canvas-wrap">
+        <canvas id="canvas"></canvas>
+        <div class="canvas-hint" id="canvas-hint">
+          <span class="pencil-ico">✎</span>
+          <span>Draw with your finger or Apple Pencil</span>
+        </div>
+        <div class="canvas-corners">
+          <span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="control-row">
+          <label class="slider-label">
+            <span>Duration</span>
+            <span class="value"><span id="dur-val">10</span>s</span>
+          </label>
+          <input type="range" id="duration" min="3" max="40" step="1" value="10">
+          <div class="ticks"><span>3s</span><span>10s</span><span>20s</span><span>40s</span></div>
+        </div>
+        <div class="control-row" id="end-mode-row">
+          <label for="end-mode" class="slider-label"><span>End behavior</span></label>
+          <select id="end-mode">
+            <option value="stop">Stop at end</option>
+            <option value="pingpong">Ping-pong</option>
+            <option value="loop">Loop (jump back)</option>
+          </select>
+        </div>
+        <div class="control-row">
+          <label for="controller" class="slider-label"><span>Controller</span></label>
+          <select id="controller"></select>
+        </div>
+        <div class="control-row">
+          <input id="name" placeholder="Drawing name (optional)" maxlength="30" autocomplete="off">
+        </div>
+        <div class="btn-row">
+          <button id="clear" class="btn ghost">Clear</button>
+          <button id="save" class="btn">Save</button>
+          <button id="save-run" class="btn gold">Save &amp; Run</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gallery -->
+  <section id="gallery" class="screen">
+    <header class="topbar">
+      <img class="brand-logo small" src="/static/assets/berkeley.png" alt="">
+      <span class="brand">Gallery</span>
+      <button class="stop-sim" id="stop-sim" title="Stop running backend">Stop</button>
+    </header>
+    <div class="content">
+      <div id="gallery-list" class="gallery-grid"></div>
+      <div id="gallery-empty" class="empty">
+        <div class="empty-glyph">⬚</div>
+        <p>No drawings yet.</p>
+        <button class="btn gold" data-view="mode">Start drawing</button>
+      </div>
+    </div>
+    <nav class="bottom-nav">
+      <button class="nav-btn" data-view="mode"><span class="ico">✎</span>Draw</button>
+      <button class="nav-btn active" data-view="gallery"><span class="ico">▤</span>Gallery</button>
+      <button class="nav-btn" data-view="training"><span class="ico">▲</span>Training</button>
+    </nav>
+  </section>
+
+  <!-- Training -->
+  <section id="training" class="screen">
+    <header class="topbar">
+      <img class="brand-logo small" src="/static/assets/berkeley.png" alt="">
+      <span class="brand">RL Training</span>
+      <span class="status-pill" id="train-pill">
+        <span class="dot"></span><span class="status-text">No runs</span>
+      </span>
+    </header>
+    <div class="content">
+      <div class="train-controls">
+        <select id="run-select"></select>
+        <label class="auto-refresh">
+          <input type="checkbox" id="auto-refresh" checked>
+          <span>Auto-refresh 5s</span>
+        </label>
+        <button class="btn ghost" id="refresh-now">Refresh</button>
+      </div>
+      <div class="kpi-row" id="kpi-row"></div>
+      <div class="chart-grid">
+        <div class="chart-card"><div class="chart-title">Episode Reward</div><div id="chart-rew" class="chart"></div></div>
+        <div class="chart-card"><div class="chart-title">Episode Length</div><div id="chart-len" class="chart"></div></div>
+        <div class="chart-card"><div class="chart-title">Value Loss</div><div id="chart-vloss" class="chart"></div></div>
+        <div class="chart-card"><div class="chart-title">Policy Gradient Loss</div><div id="chart-ploss" class="chart"></div></div>
+        <div class="chart-card"><div class="chart-title">Approx KL</div><div id="chart-kl" class="chart"></div></div>
+        <div class="chart-card"><div class="chart-title">Throughput (FPS)</div><div id="chart-fps" class="chart"></div></div>
+      </div>
+    </div>
+    <nav class="bottom-nav">
+      <button class="nav-btn" data-view="mode"><span class="ico">✎</span>Draw</button>
+      <button class="nav-btn" data-view="gallery"><span class="ico">▤</span>Gallery</button>
+      <button class="nav-btn active" data-view="training"><span class="ico">▲</span>Training</button>
+    </nav>
+  </section>
+
+  <!-- Real-backend launch sheet: shown after a "Run" on the real backend. -->
+  <div id="launch-sheet" class="launch-sheet" aria-hidden="true">
+    <div class="launch-card">
+      <h3 class="launch-title">Run on the real arm</h3>
+      <p class="launch-sub">Copy the command below, paste it in a terminal on the lab machine where the UR driver and the ROS 2 workspace are sourced.</p>
+      <pre id="launch-cmd" class="launch-cmd"></pre>
+      <p id="launch-staged" class="launch-staged"></p>
+      <div class="launch-actions">
+        <button id="launch-copy" class="btn gold">Copy</button>
+        <button id="launch-close" class="btn ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/static/api.js"></script>
+  <script src="/static/canvas.js"></script>
+  <script src="/static/gallery.js"></script>
+  <script src="/static/training.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

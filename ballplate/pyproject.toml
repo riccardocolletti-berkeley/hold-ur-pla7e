@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ballplate"
+version = "0.1.0"
+description = "Pure-Python domain library for ball-on-plate systems (state, trajectories, controllers, safety)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+rl = [
+    "stable-baselines3>=2.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ballplate"]

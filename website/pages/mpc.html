@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MPC controller · Hold UR Pla7e</title>
+  <meta name="description" content="Model-predictive controller (MPC) for the ball-on-plate testbed: a linear receding-horizon QP, one per plate axis, deployed on the UR7e arm." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Control · MPC</p>
+      <h1>MPC controller</h1>
+      <p class="lead">
+        A linear receding-horizon controller, one per plate axis, that plans the next
+        $N$ tilt commands at each tick and applies only the first, then routes through
+        wiring, inverse kinematics and smoothing to a joint trajectory.
+      </p>
+    </div>
+  </header>
+
+  <section class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 1</span>Inputs and reference frames</h3>
+    <p>
+      Two right-handed Cartesian frames are used: the world frame $\{W\}$ at the UR7e
+      base and the plate frame $\{P\}$ at the geometric centre of the plate. The ball
+      state $X = (x, y, \dot x, \dot y)$ and the reference trajectory
+      $r(t) = (x_r, y_r, \dot x_r, \dot y_r)$ are both expressed in $\{P\}$, in metres
+      and metres per second. Two errors are derived from them and consumed by the
+      controller:
+    </p>
+    <div class="math-block">
+      $$e_p = \begin{pmatrix} x - x_r \\ y - y_r \end{pmatrix}, \qquad e_v = \begin{pmatrix} \dot x - \dot x_r \\ \dot y - \dot y_r \end{pmatrix}.$$
+    </div>
+    <p>
+      The relative orientation of the two frames is encoded in a rotation matrix
+      $R_{WP}(q) \in SO(3)$, with components of a vector $v$ transforming as
+      $v^{W} = R_{WP}(q)\, v^{P}$. The inverse mapping is
+      $R_{PW}(q) = R_{WP}(q)^{\top}$.
+    </p>
+    <p>
+      In general, the pose of the plate frame in the world frame is a homogeneous
+      transform
+    </p>
+    <div class="math-block">
+      $$g_{WP}(q) \;=\; \begin{pmatrix} R_{WP}(q) & t(q) \\ 0 & 1 \end{pmatrix} \;\in\; SE(3),
+        \qquad R_{WP}(q) \in SO(3), \; t(q) \in \mathbb{R}^{3},$$
+    </div>
+    <p>
+      and a full plate-pose controller would have to regulate both the rotation
+      $R_{WP}(q)$ and the translation $t(q)$ as functions of the six joints
+      $q \in \mathbb{R}^6$.
+    </p>
+    <p>
+      In the deployed setup (see <a href="#sec-ik">§ 5</a>) the upper-arm joints
+      $q_1, q_2, q_3$ are held at their home values, so the plate centre is fixed in
+      $\{W\}$ throughout operation and the translation
+    </p>
+    <div class="math-block">
+      $$t(q) \;\equiv\; t(q_{\text{home}}) \;=\; \text{const}$$
+    </div>
+    <p>
+      drops out of the control problem. The task reduces to tracking only the
+      rotation $R_{WP}(q) \in SO(3)$. Its first two columns are the world-frame
+      coordinates of the plate's local axes $\hat x_P, \hat y_P$, and feed the
+      wiring stage below.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 420 360" style="margin: 0 auto;">
+        <defs>
+          <marker id="xA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+          <marker id="redA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#b41e28"/>
+          </marker>
+        </defs>
+        <rect x="40" y="40" width="340" height="280" fill="#fef9ed" stroke="#a48246" stroke-width="2" rx="6"/>
+        <rect x="50"  y="50"  width="22" height="22" fill="#0a1929"/>
+        <rect x="348" y="50"  width="22" height="22" fill="#0a1929"/>
+        <rect x="50"  y="298" width="22" height="22" fill="#0a1929"/>
+        <rect x="348" y="298" width="22" height="22" fill="#0a1929"/>
+        <line x1="210" y1="180" x2="320" y2="180" stroke="#003262" stroke-width="3" marker-end="url(#xA)"/>
+        <text x="328" y="184" fill="#003262" font-size="14" font-style="italic">x̂<tspan dy="3" font-size="10">P</tspan></text>
+        <line x1="210" y1="180" x2="210" y2="70" stroke="#003262" stroke-width="3" marker-end="url(#xA)"/>
+        <text x="216" y="64" fill="#003262" font-size="14" font-style="italic">ŷ<tspan dy="3" font-size="10">P</tspan></text>
+        <circle cx="210" cy="180" r="6" fill="#003262"/>
+        <circle cx="210" cy="180" r="2.5" fill="#fdb515"/>
+        <text x="195" y="200" fill="#003262" font-size="11" font-style="italic">{P}</text>
+        <g stroke="#288c5a" stroke-width="2" fill="none">
+          <circle cx="120" cy="115" r="10"/>
+          <line x1="106" y1="115" x2="134" y2="115"/>
+          <line x1="120" y1="101" x2="120" y2="129"/>
+        </g>
+        <text x="85" y="100" fill="#288c5a" font-size="11" font-style="italic">target (x<tspan dy="2" font-size="8">r</tspan><tspan dy="-2" font-size="11">, y</tspan><tspan dy="2" font-size="8">r</tspan><tspan dy="-2" font-size="11">)</tspan></text>
+        <circle cx="180" cy="245" r="14" fill="#c83040" stroke="#761018" stroke-width="1.5"/>
+        <text x="198" y="270" fill="#761018" font-size="11" font-style="italic">ball (x, y)</text>
+        <line x1="180" y1="245" x2="120" y2="115" stroke="#b41e28" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#redA)"/>
+        <text x="160" y="190" fill="#b41e28" font-size="12" font-style="italic" font-weight="600">−e<tspan dy="3" font-size="9">p</tspan></text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 1.</span> Plate frame $\{P\}$ seen from the overhead camera. Origin at the plate centre, $\hat x_P$ to the right, $\hat y_P$ up. The four corners carry the ArUco fiducials. The ball position is $(x, y)$; the target is $(x_r, y_r)$. The arrow from ball to target is the negative position error $-e_p$.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 2</span>MPC law</h3>
+    <p>
+      The MPC block takes the tracking error and emits a pair of scalar tilt angles in
+      radians,
+    </p>
+    <div class="math-block">
+      $$(u_x, u_y) \;\in\; \mathbb{R}^2,$$
+    </div>
+    <p>
+      where $u_x$ is the desired tilt of the plate about the local $\hat y_P$ axis and
+      $u_y$ is the desired tilt about $\hat x_P$. The sign convention is the same as for
+      the <a href="control.html">PID</a> page: $u_x > 0$ corresponds to a tilt that drives
+      the ball toward $-\hat x_P$, as fixed by the rolling-without-slipping equation on
+      the <a href="physics.html">physics page</a>.
+    </p>
+
+    <h4>2.1 &nbsp; Per-axis plant model</h4>
+    <p>
+      At small tilts each plate axis is a continuous-time double integrator,
+    </p>
+    <div class="math-block">
+      $$\ddot x \;=\; -\beta\, u, \qquad \beta = \alpha\, g \;\approx\; \tfrac{5}{7}\, g.$$
+    </div>
+    <p>
+      Discretising the per-axis state $s = (x, \dot x)^\top$ with a zero-order hold on
+      the input over the controller step $\Delta t$ gives a linear time-invariant
+      system $s_{k+1} = A\, s_k + B\, u_k$ with
+    </p>
+    <div class="math-block">
+      $$A \;=\; \begin{pmatrix} 1 & \Delta t \\ 0 & 1 \end{pmatrix}, \qquad
+        B \;=\; \begin{pmatrix} -\tfrac{1}{2}\, \beta\, \Delta t^{2} \\ -\beta\, \Delta t \end{pmatrix}.$$
+    </div>
+
+    <h4>2.2 &nbsp; Quadratic cost over a horizon $N$</h4>
+    <p>
+      At each control tick the MPC plans the next $N$ inputs $u_0, \dots, u_{N-1}$ to
+      minimise a quadratic cost on tracking error and control effort, with a terminal
+      cost on the predicted state at step $N$:
+    </p>
+    <div class="math-block">
+      $$\begin{aligned}
+        \min_{u_0, \ldots, u_{N-1}} \;\; & \sum_{k=1}^{N-1} \Big[ q_p\, (x_k - x_{r,k})^2 + q_v\, (\dot x_k - \dot x_{r,k})^2 + r_u\, u_{k-1}^2 \Big] \\
+        & \;+\; q_{f,p}\, (x_N - x_{r,N})^2 \;+\; q_{f,v}\, (\dot x_N - \dot x_{r,N})^2.
+      \end{aligned}$$
+    </div>
+    <p>
+      Collecting the state weights into diagonal matrices
+      $Q = \mathrm{diag}(q_p, q_v)$, $Q_f = \mathrm{diag}(q_{f,p}, q_{f,v})$ and
+      writing $\tilde s_k = s_k - r_k$ for the state-tracking error, the cost takes
+      the compact matrix form
+    </p>
+    <div class="math-block">
+      $$\min_{u_0, \ldots, u_{N-1}} \;\; \sum_{k=1}^{N-1} \Big[ \tilde s_k^{\top}\, Q\, \tilde s_k \;+\; r_u\, u_{k-1}^{2} \Big] \;+\; \tilde s_N^{\top}\, Q_f\, \tilde s_N.$$
+    </div>
+    <p>
+      The weights $(q_p, q_v, r_u, q_{f,p}, q_{f,v})$ are scalars tuned offline.
+    </p>
+
+    <h4>2.3 &nbsp; Closed-form solve, only the first input applied</h4>
+    <p>
+      Substituting the state-evolution constraint
+      $s_k = A^{k} s_0 + \sum_{j<k} A^{k-1-j} B\, u_j$ into the cost turns the problem
+      into an unconstrained quadratic programme in the input sequence. Its optimum is
+      a single linear system; the first row of the solution is the action sent to the
+      plate at the current tick,
+    </p>
+    <div class="math-block">
+      $$u_0^\star \;=\; K_x(\Delta t, A, B, Q, R)\, s_0 \;+\; K_r(\Delta t, A, B, Q, R)\, r_{0:N},$$
+    </div>
+    <p>
+      with $K_x, K_r$ precomputed offline. The remaining inputs $u_1^\star, \dots,
+      u_{N-1}^\star$ are discarded; at the next tick the plan is recomputed from the
+      new state. This receding-horizon principle is what makes the MPC a feedback
+      controller rather than an open-loop trajectory.
+    </p>
+    <p>
+      The MPC variant emits the same $(u_x, u_y)$ as the PID and feeds the same
+      downstream pipeline. It was implemented and unit-tested against analytic tracking;
+      its weights were not retuned to match the PID baseline on the perturbed-domain
+      benchmark, so the PID remains the controller deployed on the live arm.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 480 280" preserveAspectRatio="xMidYMid meet" style="margin: 0 auto;">
+        <defs>
+          <marker id="mpcBA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+        </defs>
+
+        <!-- Input column on the left: labels right-aligned with clear gap before the arrows -->
+        <text x="88" y="72" text-anchor="end" font-family="Fraunces" font-style="italic" font-size="12" fill="#003262">state s<tspan dy="3" font-size="9">0</tspan></text>
+        <line x1="100" y1="68" x2="138" y2="68" stroke="#003262" stroke-width="2" marker-end="url(#mpcBA)"/>
+        <text x="88" y="204" text-anchor="end" font-family="Fraunces" font-style="italic" font-size="12" fill="#003262">reference r<tspan dy="3" font-size="9">0:N</tspan></text>
+        <line x1="100" y1="200" x2="138" y2="200" stroke="#003262" stroke-width="2" marker-end="url(#mpcBA)"/>
+
+        <!-- Predictor block -->
+        <rect x="140" y="50" width="140" height="60" rx="10" fill="#eaf3fb" stroke="#003262" stroke-width="1.6"/>
+        <text x="210" y="76" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">predict</text>
+        <text x="210" y="94" text-anchor="middle" font-family="Fraunces" font-size="11" fill="#003262" font-style="italic">s<tspan dy="3" font-size="8">k+1</tspan><tspan dy="-3" font-size="11"> = A s</tspan><tspan dy="3" font-size="8">k</tspan><tspan dy="-3" font-size="11"> + B u</tspan><tspan dy="3" font-size="8">k</tspan></text>
+
+        <!-- Cost block -->
+        <rect x="140" y="182" width="140" height="60" rx="10" fill="#eaf3fb" stroke="#003262" stroke-width="1.6"/>
+        <text x="210" y="206" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">quadratic cost</text>
+        <text x="210" y="224" text-anchor="middle" font-family="Fraunces" font-size="11" fill="#003262" font-style="italic">‖ s<tspan dy="3" font-size="8">k</tspan><tspan dy="-3" font-size="11"> − r</tspan><tspan dy="3" font-size="8">k</tspan><tspan dy="-3" font-size="11"> ‖</tspan><tspan dy="-3" font-size="8">2</tspan><tspan dy="6" font-size="8">Q</tspan><tspan dy="-3" font-size="11"> + ‖ u</tspan><tspan dy="3" font-size="8">k</tspan><tspan dy="-3" font-size="11"> ‖</tspan><tspan dy="-3" font-size="8">2</tspan><tspan dy="6" font-size="8">R</tspan></text>
+
+        <!-- Arrows into solver -->
+        <line x1="280" y1="80"  x2="320" y2="130" stroke="#003262" stroke-width="2" marker-end="url(#mpcBA)"/>
+        <line x1="280" y1="212" x2="320" y2="162" stroke="#003262" stroke-width="2" marker-end="url(#mpcBA)"/>
+
+        <!-- Solver block -->
+        <rect x="320" y="118" width="120" height="56" rx="10" fill="#fef3da" stroke="#c4820e" stroke-width="1.6"/>
+        <text x="380" y="142" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="13" fill="#c4820e">closed-form QP</text>
+        <text x="380" y="160" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#c4820e">u<tspan dy="3" font-size="8">0</tspan><tspan dy="-6" font-size="9">★</tspan><tspan dy="3" font-size="11">, …, u</tspan><tspan dy="3" font-size="8">N−1</tspan><tspan dy="-6" font-size="9">★</tspan></text>
+
+        <!-- Output arrow with "only u_0 applied" -->
+        <line x1="440" y1="146" x2="478" y2="146" stroke="#003262" stroke-width="2.4" marker-end="url(#mpcBA)"/>
+        <text x="460" y="135" text-anchor="middle" font-family="Fraunces" font-weight="700" font-style="italic" font-size="12" fill="#003262">u<tspan dy="3" font-size="9">0</tspan><tspan dy="-6" font-size="10">★</tspan></text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 2.</span> One MPC tick. The plant model is rolled forward over the next $N$ steps, the candidate input sequence is scored by the quadratic cost, and the closed-form QP returns the optimal sequence. Only the first input $u_0^\star$ is sent to the plate; the controller replans on the next tick.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 3</span>Wiring: scalars to a world-frame rotation</h3>
+    <p>
+      The scalars $(u_x, u_y)$ are tilt angles about the plate's local axes
+      $\hat x_P, \hat y_P$. The downstream inverse-kinematics step needs the
+      corresponding rotation 3-vector expressed in the world frame $\{W\}$, because
+      the manipulator Jacobian maps joint motion to world-frame plate rotations.
+      The wiring stage performs that change of basis.
+    </p>
+    <p>
+      Writing $\hat x_P^{\,W}(q)$ for the plate's local $\hat x_P$ axis with its
+      components expressed in $\{W\}$,
+    </p>
+    <div class="math-block">
+      $$\hat x_P^{\,W}(q) \;=\; R_{WP}(q)\, \hat e_x, \qquad \hat y_P^{\,W}(q) \;=\; R_{WP}(q)\, \hat e_y,$$
+    </div>
+    <p>
+      where $\hat e_x, \hat e_y$ are the standard basis vectors, the two vectors
+      $\hat x_P^{\,W}(q)$ and $\hat y_P^{\,W}(q)$ are the first two columns of
+      $R_{WP}(q)$.
+    </p>
+    <p>
+      For a small angle $\alpha$, a rotation by $\alpha$ about a unit axis $\hat n$
+      is represented in axis-angle form by the 3-vector $\alpha \hat n$. Stacking
+      the two scalar tilts, the target rotation in $\{W\}$ is
+    </p>
+    <div class="math-block">
+      $$\theta_{\text{tar}} \;=\; u_y\, \hat x_P^{\,W}(q) \;-\; u_x\, \hat y_P^{\,W}(q) \;\in\; \mathbb{R}^{3}.$$
+    </div>
+    <p>
+      The minus sign on the $u_x$ term comes from the rolling-equation convention
+      fixed on the <a href="physics.html">physics page</a>: $u_x > 0$ must drive the
+      ball toward $-\hat x_P$, which corresponds to a rotation about $-\hat y_P$.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 260" style="margin: 0 auto;">
+        <line x1="40" y1="160" x2="420" y2="160" stroke="#bbb" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <text x="425" y="164" fill="#888" font-size="10" font-style="italic">horizon</text>
+        <g transform="rotate(-15 230 160)">
+          <rect x="80" y="152" width="300" height="14" fill="#dcc093" stroke="#a48246" stroke-width="2" rx="3"/>
+          <circle cx="270" cy="138" r="14" fill="#c83040" stroke="#761018" stroke-width="1.5"/>
+          <line x1="200" y1="160" x2="350" y2="160" stroke="#003262" stroke-width="3" marker-end="url(#bA1)"/>
+          <text x="358" y="164" fill="#003262" font-size="14" font-family="Fraunces" font-style="italic" font-weight="700">x̂<tspan dy="3" font-size="10">P</tspan><tspan dy="-5" font-size="10">W</tspan></text>
+        </g>
+        <!-- small θ_y arc near the pivot: radius 32, no fill, ends just at the plate-axis direction so it doesn't drown into the thick plate -->
+        <path d="M 262 160 A 32 32 0 0 0 260.9 151.7" fill="none" stroke="#6643a0" stroke-width="2"/>
+        <text x="270" y="156" fill="#6643a0" font-size="13" font-style="italic" font-weight="600">θ<tspan dy="3" font-size="9">y</tspan></text>
+        <text x="200" y="55" text-anchor="middle" fill="#003262" font-size="13" font-style="italic">plate tilted by θ<tspan dy="3" font-size="9">y</tspan><tspan dy="-3" font-size="13"> about world ŷ</tspan><tspan dy="3" font-size="9">W</tspan></text>
+        <defs><marker id="bA1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/></marker></defs>
+      </svg>
+      <figcaption><span class="fig-num">Figure 3.</span> The plate is tilted by an angle $\theta_y$ about the world's $\hat y_W$ axis. The arrow $\hat x_P^{\,W}(q)$ is the plate's local $\hat x_P$ axis expressed in world coordinates at the current configuration $q$, i.e. the first column of $R_{WP}(q)$, pointing along the slope in $\{W\}$.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 4</span>Rotation increment</h3>
+    <p>
+      The next stage is the inverse kinematics, where the rotational Jacobian
+      $J_r(q) \in \mathbb{R}^{3 \times 6}$ relates joint displacements $\Delta q$ to plate
+      rotations: in the small-displacement regime,
+      $J_r(q)\, \Delta q \approx \Delta\theta$. This relation is a first-order Taylor
+      expansion around $q$ and is accurate only when $\Delta\theta$ is genuinely small.
+      Feeding the IK an absolute target rotation produces large residual joint motion
+      and breaks the linearisation as soon as the plate is no longer near home.
+    </p>
+    <p>
+      To avoid this, the current plate rotation $\theta_{\text{cur}}$ is read from the
+      transform tree (encoding the current $R_{WP}(q)$ in axis-angle form) and subtracted
+      from the absolute target:
+    </p>
+    <div class="math-block">
+      $$\Delta\theta \;=\; \theta_{\text{tar}} \;-\; \theta_{\text{cur}}.$$
+    </div>
+    <p>
+      The IK then solves for the joint displacement that produces $\Delta\theta$, not
+      $\theta_{\text{tar}}$; the linearisation is exercised only on small residuals.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 260" style="margin: 0 auto;">
+        <rect x="20"  y="30"  width="120" height="60" rx="10" fill="#eaf3fb" stroke="#003262" stroke-width="1.5"/>
+        <text x="80" y="58" text-anchor="middle" fill="#003262" font-weight="600" font-size="13">target</text>
+        <text x="80" y="78" text-anchor="middle" fill="#444" font-size="13" font-family="Fraunces" font-style="italic">θ<tspan dy="3" font-size="9">tar</tspan></text>
+        <rect x="20"  y="170" width="120" height="60" rx="10" fill="#eaf3fb" stroke="#003262" stroke-width="1.5"/>
+        <text x="80" y="198" text-anchor="middle" fill="#003262" font-weight="600" font-size="13">current</text>
+        <text x="80" y="218" text-anchor="middle" fill="#444" font-size="13" font-family="Fraunces" font-style="italic">θ<tspan dy="3" font-size="9">cur</tspan></text>
+        <circle cx="220" cy="130" r="22" fill="#fff" stroke="#b41e28" stroke-width="2"/>
+        <text x="220" y="138" text-anchor="middle" fill="#b41e28" font-size="22" font-weight="700">−</text>
+        <path d="M 142 60 C 175 60 200 100 198 110" fill="none" stroke="#003262" stroke-width="2" marker-end="url(#bA2)"/>
+        <path d="M 142 200 C 175 200 200 160 198 150" fill="none" stroke="#003262" stroke-width="2" marker-end="url(#bA2)"/>
+        <line x1="244" y1="130" x2="290" y2="130" stroke="#003262" stroke-width="2" marker-end="url(#bA2)"/>
+        <rect x="290" y="100" width="100" height="60" rx="10" fill="#fef3da" stroke="#c4820e" stroke-width="2"/>
+        <text x="340" y="128" text-anchor="middle" fill="#c4820e" font-weight="700" font-style="italic" font-size="14">Δθ</text>
+        <text x="340" y="146" text-anchor="middle" fill="#444" font-size="10" font-style="italic">to IK</text>
+        <defs><marker id="bA2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/></marker></defs>
+      </svg>
+      <figcaption><span class="fig-num">Figure 4.</span> Rotation increment. The absolute target $\theta_{\text{tar}}$ produced by the wiring stage and the current plate rotation $\theta_{\text{cur}}$ read from the transform tree are subtracted; the IK consumes the residual $\Delta\theta$.</figcaption>
+    </figure>
+
+    <h3 id="sec-ik" class="section-h"><span class="section-num">§ 5</span>Inverse kinematics</h3>
+    <p>
+      The geometric Jacobian of the manipulator decomposes into a positional block and a
+      rotational block:
+    </p>
+    <div class="math-block">
+      $$J(q) \;=\; \begin{pmatrix} J_p(q) \\ J_r(q) \end{pmatrix} \;\in\; \mathbb{R}^{6 \times 6}, \qquad J_p, J_r \in \mathbb{R}^{3 \times 6}.$$
+    </div>
+    <p>
+      $J_p$ relates joint velocities to the linear velocity of the wrist and is unused
+      here, because the position of the plate centre is fixed by the locked upper-arm
+      joints. $J_r$ relates joint velocities to the angular velocity of the plate; in
+      the small-displacement regime,
+      $J_r(q)\, \Delta q \approx \Delta\theta$.
+    </p>
+    <p>
+      The system has three equations and six unknowns and is therefore underdetermined.
+      With the upper-arm joints $q_1, q_2, q_3$ locked, the corresponding three columns
+      of $J_r$ are dropped; only the wrist columns contribute. The remaining
+      $3 \times 3$ subsystem is square and well-conditioned at the home configuration.
+      The minimum-norm solution is computed via the Moore-Penrose pseudoinverse:
+    </p>
+    <div class="math-block">
+      $$\Delta q \;=\; J_r(q)^{+} \, \Delta\theta.$$
+    </div>
+    <p>
+      In practice the pseudoinverse is computed via the SVD-based least-squares routine,
+      which is numerically stable when the wrist subsystem approaches singularity
+      (e.g. at gimbal-lock configurations).
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 320" style="margin: 0 auto;">
+        <text x="20" y="40" fill="#003262" font-size="13" font-style="italic">J<tspan dy="3" font-size="9">r</tspan><tspan dy="-3" font-size="13">(q) partitioned</tspan></text>
+        <g transform="translate(40 80)">
+          <text x="-22" y="60" fill="#003262" font-size="40">[</text>
+          <g fill="#d8d8d8" stroke="#aaa" stroke-width="1">
+            <rect x="0"  y="0"  width="42" height="36"/><rect x="44" y="0"  width="42" height="36"/><rect x="88" y="0"  width="42" height="36"/>
+            <rect x="0"  y="38" width="42" height="36"/><rect x="44" y="38" width="42" height="36"/><rect x="88" y="38" width="42" height="36"/>
+            <rect x="0"  y="76" width="42" height="36"/><rect x="44" y="76" width="42" height="36"/><rect x="88" y="76" width="42" height="36"/>
+          </g>
+          <g fill="#fef3da" stroke="#c4820e" stroke-width="1.5">
+            <rect x="134" y="0"  width="42" height="36"/><rect x="178" y="0"  width="42" height="36"/><rect x="222" y="0"  width="42" height="36"/>
+            <rect x="134" y="38" width="42" height="36"/><rect x="178" y="38" width="42" height="36"/><rect x="222" y="38" width="42" height="36"/>
+            <rect x="134" y="76" width="42" height="36"/><rect x="178" y="76" width="42" height="36"/><rect x="222" y="76" width="42" height="36"/>
+          </g>
+          <g fill="#8d5e0a" font-size="11" font-family="JetBrains Mono" text-anchor="middle">
+            <text x="155" y="22">j<tspan dy="3" font-size="8">14</tspan></text><text x="199" y="22">j<tspan dy="3" font-size="8">15</tspan></text><text x="243" y="22">j<tspan dy="3" font-size="8">16</tspan></text>
+            <text x="155" y="60">j<tspan dy="3" font-size="8">24</tspan></text><text x="199" y="60">j<tspan dy="3" font-size="8">25</tspan></text><text x="243" y="60">j<tspan dy="3" font-size="8">26</tspan></text>
+            <text x="155" y="98">j<tspan dy="3" font-size="8">34</tspan></text><text x="199" y="98">j<tspan dy="3" font-size="8">35</tspan></text><text x="243" y="98">j<tspan dy="3" font-size="8">36</tspan></text>
+          </g>
+          <text x="280" y="60" fill="#003262" font-size="40">]</text>
+          <text x="65"  y="135" text-anchor="middle" font-size="10" fill="#888" font-style="italic">locked (shoulder · lift · elbow)</text>
+          <text x="200" y="135" text-anchor="middle" font-size="10" fill="#c4820e" font-style="italic" font-weight="600">free (wrist 1 · 2 · 3)</text>
+        </g>
+        <text x="230" y="270" text-anchor="middle" font-size="14" font-family="Fraunces" font-style="italic" fill="#003262">J<tspan dy="3" font-size="10">r</tspan><tspan dy="-3" font-size="14">(q) Δq = Δθ &#8658; Δq = J</tspan><tspan dy="3" font-size="10">r</tspan><tspan dy="-3" font-size="14">(q)</tspan><tspan dy="-4" font-size="10">+</tspan><tspan dy="4" font-size="14"> Δθ</tspan></text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 5.</span> The rotational Jacobian $J_r \in \mathbb{R}^{3 \times 6}$. The columns corresponding to locked joints are dropped; the remaining three wrist columns form a $3 \times 3$ subsystem.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 6</span>Smoothing and publication</h3>
+    <p>
+      The raw $\Delta q$ is clipped per-joint to a safe maximum tilt
+      $\Delta q_{\max}$ and then passed through a first-order low-pass filter to
+      attenuate high-frequency content that would excite the structural modes of the
+      arm:
+    </p>
+    <div class="math-block">
+      $$\Delta q_f^{(k+1)} \;=\; \alpha\, \Delta q^{(k+1)} \;+\; (1 - \alpha)\, \Delta q_f^{(k)}, \qquad \alpha \in (0, 1].$$
+    </div>
+    <p>
+      The filtered correction is added to the current configuration to produce the
+      target,
+    </p>
+    <div class="math-block">
+      $$q_{\text{tgt}} \;=\; q_{\text{cur}} \;+\; \Delta q_f,$$
+    </div>
+    <p>
+      which is published as a joint trajectory message at the controller rate. The
+      vendor's joint-space firmware takes over from there: it interpolates between
+      successive waypoints and runs an internal joint-level loop with gravity
+      compensation. This boundary is described in more detail on the
+      <a href="ros.html">ROS page</a>.
+    </p>
+
+    <h3 class="section-h"><span class="section-num">§ 7</span>Notation</h3>
+    <dl class="notation-list">
+      <dt>$e_p, e_v$</dt><dd>position and velocity tracking errors (defined on the setup page).</dd>
+      <dt>$u_x, u_y$</dt><dd>scalar tilt angles, output of the position-level controller.</dd>
+      <dt>$K_p, K_i, K_d$</dt><dd>PID gains.</dd>
+      <dt>$\beta = \alpha g$</dt><dd>plate-tilt gain in the rolling equation, $\alpha = 5/7$.</dd>
+      <dt>$R_{WP}(q) \in SO(3)$</dt><dd>rotation matrix that takes components in $\{P\}$ to components in $\{W\}$: $v^W = R_{WP}(q)\, v^P$.</dd>
+      <dt>$\hat x_P^{\,W}(q), \hat y_P^{\,W}(q)$</dt><dd>plate's local $\hat x_P, \hat y_P$ axes expressed in $\{W\}$: the first two columns of $R_{WP}(q)$.</dd>
+      <dt>$\theta_{\text{tar}}, \theta_{\text{cur}}, \Delta\theta \in \mathbb{R}^3$</dt><dd>target, current, and incremental plate rotation in axis-angle form.</dd>
+      <dt>$J(q), J_p(q), J_r(q)$</dt><dd>full geometric Jacobian and its positional and rotational blocks.</dd>
+      <dt>$\Delta q, \Delta q_f$</dt><dd>raw and low-pass-filtered joint displacement.</dd>
+      <dt>$q_{\text{cur}}, q_{\text{tgt}}$</dt><dd>current and target joint configurations.</dd>
+    </dl>
+
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 8</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Rawlings, J. B., Mayne, D. Q., Diehl, M. M.</span> (2017).
+          <span class="bib-title">Model Predictive Control: Theory, Computation, and Design</span> (2nd ed.).
+          <span class="bib-venue">Nob Hill Publishing</span>.
+          <a class="bib-link" href="https://sites.engineering.ucsb.edu/~jbraw/mpc/" target="_blank" rel="noopener">sites.engineering.ucsb.edu/~jbraw/mpc</a>
+        </li>
+        <li>
+          <span class="bib-authors">Borrelli, F., Bemporad, A., Morari, M.</span> (2017).
+          <span class="bib-title">Predictive Control for Linear and Hybrid Systems</span>.
+          <span class="bib-venue">Cambridge University Press</span>.
+          <a class="bib-link" href="https://www.cambridge.org/highereducation/books/predictive-control-for-linear-and-hybrid-systems/EF618BD7AFAF4D04B2044A0FD03D885A" target="_blank" rel="noopener">cambridge.org</a>
+        </li>
+        <li>
+          <span class="bib-authors">Mayne, D. Q., Rawlings, J. B., Rao, C. V., Scokaert, P. O. M.</span> (2000).
+          <span class="bib-title">Constrained model predictive control: stability and optimality</span>.
+          <span class="bib-venue">Automatica, 36(6), 789–814</span>.
+          <a class="bib-link" href="https://doi.org/10.1016/S0005-1098(99)00214-9" target="_blank" rel="noopener">doi.org/10.1016/S0005-1098(99)00214-9</a>
+        </li>
+        <li>
+          <span class="bib-authors">García, C. E., Prett, D. M., Morari, M.</span> (1989).
+          <span class="bib-title">Model predictive control: theory and practice — a survey</span>.
+          <span class="bib-venue">Automatica, 25(3), 335–348</span>.
+          <a class="bib-link" href="https://doi.org/10.1016/0005-1098(89)90002-2" target="_blank" rel="noopener">doi.org/10.1016/0005-1098(89)90002-2</a>
+        </li>
+        <li>
+          <span class="bib-authors">Bemporad, A., Morari, M., Dua, V., Pistikopoulos, E. N.</span> (2002).
+          <span class="bib-title">The explicit linear quadratic regulator for constrained systems</span>.
+          <span class="bib-venue">Automatica, 38(1), 3–20</span>.
+          <a class="bib-link" href="https://doi.org/10.1016/S0005-1098(01)00174-1" target="_blank" rel="noopener">doi.org/10.1016/S0005-1098(01)00174-1</a>
+        </li>
+        <li>
+          <span class="bib-authors">Maciejowski, J. M.</span> (2002).
+          <span class="bib-title">Predictive Control with Constraints</span>.
+          <span class="bib-venue">Prentice Hall</span>.
+          <a class="bib-link" href="http://www-control.eng.cam.ac.uk/jmm/mpcbook/mpcbook.html" target="_blank" rel="noopener">www-control.eng.cam.ac.uk/jmm/mpcbook</a>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

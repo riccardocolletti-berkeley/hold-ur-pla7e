@@ -1,0 +1,19 @@
+# Reward weights used by `sim.learning.reward.step_reward`.
+#
+#   r_step = w_track   * exp(-||pos_err|| / sigma_pos)
+#          + w_vel     * exp(-||vel_err|| / sigma_vel)
+#          + w_prog    * (prev_pos_err - pos_err)
+#          - w_act     * |action|^2
+#          - w_smooth  * |Δaction|^2
+#
+#   r_drop_terminal = -w_drop * (steps_remaining / episode_steps)
+#       e.g. drop at step 50/1000 costs ~95, at 950/1000 costs ~5.
+
+w_track:    1.00       # exponential position bonus, max 1.0/step
+w_vel:      0.30       # exponential velocity bonus, max 0.30/step
+w_prog:     0.50       # potential-based progress bonus
+w_act:      0.01
+w_smooth:   0.05
+w_drop:   100.00       # scaled by remaining-fraction at drop time
+sigma_pos:  0.05       # m, characteristic distance for tracking decay
+sigma_vel:  0.20       # m/s, characteristic velocity error decay

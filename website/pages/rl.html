@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reinforcement Learning · Hold UR Pla7e</title>
+  <meta name="description" content="Residual PPO policy for the ball-on-plate testbed: a bounded neural correction added to a PID baseline, trained in MuJoCo with domain randomisation." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Control · Residual PPO</p>
+      <h1>Residual PPO controller</h1>
+      <p class="lead">
+        A bounded neural correction trained with Proximal Policy Optimization,
+        summed on top of the deployed <a href="control.html">PID</a> command so
+        that it fine-tunes the baseline without replacing it. Training is
+        performed in MuJoCo with seven physical and sensing parameters randomised
+        per episode.
+      </p>
+    </div>
+  </header>
+
+  <section class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 1</span>Motivation</h3>
+    <p>
+      The hand-tuned <a href="control.html">PID</a> of <a href="control.html#sec-law">§ 2</a>
+      is reliable inside the operating envelope it was tuned for: nominal ball mass,
+      nominal plate friction, low sensing noise, low actuation latency. Outside that
+      envelope its fixed gains $(K_p, K_i, K_d)$ no longer match the closed-loop
+      dynamics, and the tracking error grows or the ball drops. Re-tuning by hand
+      for every parameter setting is impractical, and a single conservative gain
+      schedule trades nominal performance for robustness.
+    </p>
+    <p>
+      Residual reinforcement learning takes a different route. The PID is left
+      in place, and a small additional correction is added on top of its
+      command at every control step. Four design choices make this work:
+    </p>
+
+    <div class="ctrl-walk ctrl-walk-rl rl-motiv-walk" style="background:none; padding:0; margin: 1.25rem 0 1.5rem;">
+      <div class="walk-grid stagger">
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="7"/><line x1="12" y1="5" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="19"/><line x1="5" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="19" y2="12"/><line x1="12" y1="12" x2="16" y2="9"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <span class="walk-num">1</span>
+          <h4>Keep the PID baseline</h4>
+          <p>
+            The hand-tuned PID continues to do most of the work: pulling the
+            ball toward the reference, damping the response, and cancelling
+            steady-state offsets. The learned component only adds to its
+            command; it never replaces the proportional, integral, or
+            derivative terms.
+          </p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="7" r="1.8" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="6" cy="17" r="1.8" fill="currentColor" stroke="none"/><circle cx="18" cy="10" r="1.8" fill="currentColor" stroke="none"/><circle cx="18" cy="14" r="1.8" fill="currentColor" stroke="none"/><line x1="8" y1="7" x2="16" y2="10" opacity="0.45"/><line x1="8" y1="7" x2="16" y2="14" opacity="0.45"/><line x1="8" y1="12" x2="16" y2="10" opacity="0.45"/><line x1="8" y1="12" x2="16" y2="14" opacity="0.45"/><line x1="8" y1="17" x2="16" y2="10" opacity="0.45"/><line x1="8" y1="17" x2="16" y2="14" opacity="0.45"/>
+            </svg>
+          </span>
+          <span class="walk-num">2</span>
+          <h4>Add a neural correction</h4>
+          <p>
+            A feedforward policy reads the current observation of the
+            ball-plate system and emits a two-dimensional output. This output
+            is the residual: a small per-axis tilt adjustment that is summed
+            with the PID command before the wiring stage.
+          </p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M 4 6 L 4 18 M 4 7.5 L 8 7.5 M 4 16.5 L 8 16.5"/><path d="M 20 6 L 20 18 M 20 7.5 L 16 7.5 M 20 16.5 L 16 16.5"/><line x1="7" y1="12" x2="17" y2="12"/><polyline points="14,9 17,12 14,15"/>
+            </svg>
+          </span>
+          <span class="walk-num">3</span>
+          <h4>Bound the correction</h4>
+          <p>
+            The residual is multiplied by a small fixed factor $\alpha = 0.3$
+            before being added, so $\lVert \alpha\, \pi_\theta \rVert_\infty
+            \le \alpha$: the network can refine the baseline but cannot
+            override it. A zero policy reproduces the deployed PID exactly, so
+            a freshly initialised network starts no worse than the baseline.
+          </p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.4" ry="8.5"/><line x1="3.5" y1="12" x2="20.5" y2="12"/><path d="M 4.5 7.5 Q 12 9 19.5 7.5"/><path d="M 4.5 16.5 Q 12 15 19.5 16.5"/>
+            </svg>
+          </span>
+          <span class="walk-num">4</span>
+          <h4>Train across many plants</h4>
+          <p>
+            Producing a correction that generalises across many operating
+            conditions requires training samples from many operating
+            conditions. The simulator is therefore not run on the nominal
+            plant: at every episode it is reset with seven physical and
+            sensing parameters drawn from a wide envelope (<em>domain
+            randomisation</em>).
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <p>
+      The seven randomised parameters are the ball mass, the ball-plate
+      friction, the plate-air friction, the initial ball offset from the plate
+      centre, a small multiplicative perturbation on gravity, the standard
+      deviation of the position-measurement noise, and the end-to-end
+      actuation latency. The exact ranges are listed in § 5. Because every
+      episode is a slightly different plant, the policy is forced to remain
+      competent across the whole envelope of conditions rather than overfit to
+      a single nominal setting.
+    </p>
+
+    <p>
+      Concretely, the closed-loop tilt command at each control step is the sum
+      of the PID output and the scaled policy output:
+    </p>
+    <div class="math-block">
+      $$(u_x, u_y) \;=\; \underbrace{\mathrm{PID}(e_p, e_v)}_{\text{baseline}}
+        \;+\;
+        \underbrace{\alpha\, \pi_\theta(o_t)}_{\text{residual}},
+        \qquad \alpha = 0.3, \;\; \pi_\theta(o_t) \in [-1, 1]^2.$$
+    </div>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 760 320" style="margin: 0 auto;">
+        <defs>
+          <marker id="bA1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/></marker>
+          <marker id="gA1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4820e"/></marker>
+          <marker id="pA1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#6643a0"/></marker>
+          <linearGradient id="gradPID" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#fff4d8"/>
+            <stop offset="100%" stop-color="#f5d589"/>
+          </linearGradient>
+          <linearGradient id="gradPI" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#f4e9ff"/>
+            <stop offset="100%" stop-color="#d8c2f0"/>
+          </linearGradient>
+        </defs>
+
+        <!-- ===== Vision / state-estimator block (left) — receives the plant feedback and emits both signals ===== -->
+        <g>
+          <rect x="8" y="120" width="58" height="68" rx="8" fill="#f5f4f1" stroke="#888" stroke-width="1.3"/>
+          <text x="37" y="146" text-anchor="middle" font-family="Fraunces" font-style="italic" font-weight="600" font-size="12" fill="#444">vision</text>
+          <text x="37" y="164" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="10" fill="#888">+ Kalman</text>
+          <text x="37" y="180" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#666">→ X</text>
+        </g>
+
+        <!-- vision → PID (errors branch) -->
+        <path d="M 66 132 C 88 132 96 80 120 80" fill="none" stroke="#c4820e" stroke-width="2" marker-end="url(#gA1)"/>
+        <text x="92" y="100" font-family="Fraunces" font-style="italic" font-size="11" fill="#8d5e0a">e<tspan dy="3" font-size="8">p</tspan><tspan dy="-3" font-size="11">, e</tspan><tspan dy="3" font-size="8">v</tspan></text>
+
+        <!-- vision → policy (observation branch) -->
+        <path d="M 66 176 C 88 176 96 220 120 220" fill="none" stroke="#6643a0" stroke-width="2" marker-end="url(#pA1)"/>
+        <text x="92" y="212" font-family="Fraunces" font-style="italic" font-size="11" fill="#5d3a9a">o<tspan dy="3" font-size="8">t</tspan></text>
+
+        <!-- ===== PID block (top branch) ===== -->
+        <g>
+          <rect x="120" y="40" width="200" height="80" rx="12" fill="url(#gradPID)" stroke="#c4820e" stroke-width="1.8"/>
+          <text x="220" y="62" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="14" fill="#8d5e0a">PID baseline</text>
+          <!-- mini K_p / K_i / K_d glyphs -->
+          <g font-family="Fraunces" font-style="italic" font-weight="700" font-size="13" fill="#5d3a05" text-anchor="middle">
+            <circle cx="155" cy="95" r="14" fill="#fff" stroke="#c4820e" stroke-width="1.2"/>
+            <text x="155" y="100">K<tspan dy="3" font-size="9">p</tspan></text>
+            <circle cx="220" cy="95" r="14" fill="#fff" stroke="#c4820e" stroke-width="1.2"/>
+            <text x="220" y="100">K<tspan dy="3" font-size="9">i</tspan></text>
+            <circle cx="285" cy="95" r="14" fill="#fff" stroke="#c4820e" stroke-width="1.2"/>
+            <text x="285" y="100">K<tspan dy="3" font-size="9">d</tspan></text>
+          </g>
+        </g>
+
+        <!-- ===== Policy block (bottom branch) ===== -->
+        <g>
+          <rect x="120" y="180" width="200" height="80" rx="12" fill="url(#gradPI)" stroke="#6643a0" stroke-width="1.8"/>
+          <text x="220" y="202" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="14" fill="#5d3a9a">policy network π<tspan dy="3" font-size="10">θ</tspan></text>
+          <!-- mini NN visualization: 4 input dots → 3 hidden → 2 output -->
+          <g stroke="#6643a0" stroke-width="0.5" opacity="0.45">
+            <line x1="145" y1="223" x2="190" y2="227"/><line x1="145" y1="223" x2="190" y2="243"/><line x1="145" y1="223" x2="190" y2="251"/>
+            <line x1="145" y1="234" x2="190" y2="227"/><line x1="145" y1="234" x2="190" y2="243"/><line x1="145" y1="234" x2="190" y2="251"/>
+            <line x1="145" y1="245" x2="190" y2="227"/><line x1="145" y1="245" x2="190" y2="243"/><line x1="145" y1="245" x2="190" y2="251"/>
+            <line x1="145" y1="256" x2="190" y2="227"/><line x1="145" y1="256" x2="190" y2="243"/><line x1="145" y1="256" x2="190" y2="251"/>
+            <line x1="190" y1="227" x2="240" y2="234"/><line x1="190" y1="227" x2="240" y2="246"/>
+            <line x1="190" y1="243" x2="240" y2="234"/><line x1="190" y1="243" x2="240" y2="246"/>
+            <line x1="190" y1="251" x2="240" y2="234"/><line x1="190" y1="251" x2="240" y2="246"/>
+          </g>
+          <g fill="#6643a0">
+            <circle cx="145" cy="223" r="2.6"/><circle cx="145" cy="234" r="2.6"/><circle cx="145" cy="245" r="2.6"/><circle cx="145" cy="256" r="2.6"/>
+            <circle cx="190" cy="227" r="2.8"/><circle cx="190" cy="243" r="2.8"/><circle cx="190" cy="251" r="2.8"/>
+            <circle cx="240" cy="234" r="3.2" fill="#c4820e"/><circle cx="240" cy="246" r="3.2" fill="#c4820e"/>
+          </g>
+          <text x="280" y="244" font-family="Fraunces" font-style="italic" font-size="10" fill="#5d3a9a">∈ [−1,1]<tspan dy="-3" font-size="8">2</tspan></text>
+        </g>
+
+        <!-- ===== Sum circle (placed first so arrows can land on it) ===== -->
+        <g>
+          <circle cx="450" cy="160" r="22" fill="#fff" stroke="#003262" stroke-width="2.2"/>
+          <text x="450" y="168" text-anchor="middle" font-family="Fraunces" font-size="22" font-weight="700" fill="#003262">+</text>
+        </g>
+
+        <!-- PID top branch: from PID right edge (320, 80) to sum perimeter -->
+        <line x1="320" y1="80"  x2="431" y2="148" stroke="#c4820e" stroke-width="2" marker-end="url(#gA1)"/>
+
+        <!-- Policy bottom branch: policy → α (perimeter) -->
+        <line x1="320" y1="220" x2="375" y2="200" stroke="#6643a0" stroke-width="2" marker-end="url(#pA1)"/>
+        <g>
+          <circle cx="385" cy="197" r="14" fill="#fff" stroke="#6643a0" stroke-width="1.5"/>
+          <text x="385" y="202" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="13" font-weight="700" fill="#5d3a9a">α</text>
+        </g>
+        <!-- α → sum -->
+        <line x1="399" y1="194" x2="432" y2="174" stroke="#6643a0" stroke-width="2" marker-end="url(#pA1)"/>
+
+        <!-- output arrow -->
+        <line x1="472" y1="160" x2="540" y2="160" stroke="#003262" stroke-width="2.5" marker-end="url(#bA1)"/>
+        <text x="506" y="148" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="12" fill="#003262">(u<tspan dy="3" font-size="9">x</tspan><tspan dy="-3" font-size="12">, u</tspan><tspan dy="3" font-size="9">y</tspan><tspan dy="-3" font-size="12">)</tspan></text>
+
+        <!-- ===== Plant visualization (right) ===== -->
+        <g transform="translate(620 160)">
+          <!-- horizon -->
+          <line x1="-60" y1="0" x2="80" y2="0" stroke="#ccc" stroke-width="0.8" stroke-dasharray="3 3"/>
+          <!-- tilted plate -->
+          <g transform="rotate(-12)">
+            <rect x="-60" y="-4" width="140" height="8" fill="#dcc093" stroke="#a48246" stroke-width="1.4" rx="2"/>
+            <circle cx="35" cy="-12" r="9" fill="#c83040" stroke="#761018" stroke-width="1"/>
+            <!-- plate axis -->
+            <line x1="-20" y1="0" x2="50" y2="0" stroke="#003262" stroke-width="1.5"/>
+          </g>
+          <!-- θ_tar arc -->
+          <path d="M 35 0 A 30 30 0 0 0 29.3 -6.2" fill="none" stroke="#003262" stroke-width="1.4"/>
+          <text x="44" y="-3" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">θ<tspan dy="3" font-size="9">tar</tspan></text>
+          <!-- caption -->
+          <text x="10" y="58" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#888">plant (UR7e + plate + ball)</text>
+        </g>
+
+        <!-- dashed feedback path from plant bottom: DOWN, LEFT, UP, all right-angle corners -->
+        <path d="M 620 230 V 280 H 37 V 192" fill="none" stroke="#888" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#bA1)"/>
+        <text x="350" y="298" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#888">ball state recovered by the vision pipeline closes the loop</text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 1.</span> Closed-loop action. The PID baseline reads the tracking errors $(e_p, e_v)$ and emits the bulk of the tilt command through its three gains $K_p, K_i, K_d$. In parallel, the policy network $\pi_\theta$ reads the 12-dimensional observation $o_t$ and emits a bounded residual $a_t \in [-1, 1]^2$, scaled by $\alpha$ before being summed. The combined command $(u_x, u_y)$ is forwarded to the wiring stage of the <a href="control.html#sec-wiring">PID page (§ 3)</a>, then to the IK and the arm; the plant feeds the vision pipeline, which closes the loop.</figcaption>
+    </figure>
+
+    <p>
+      Training has to learn only the corrections that the fixed PID gains
+      cannot express, which is a substantially easier problem than learning a
+      full controller from scratch. The region of plant conditions over which
+      the residual is competent is shown schematically below.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 720 400" style="margin: 0 auto;">
+        <defs>
+          <marker id="envA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#444"/>
+          </marker>
+          <radialGradient id="envOuter" cx="0.5" cy="0.5" r="0.8">
+            <stop offset="0%"  stop-color="#f4e9ff" stop-opacity="0.95"/>
+            <stop offset="100%" stop-color="#d8c2f0" stop-opacity="0.55"/>
+          </radialGradient>
+          <radialGradient id="envInner" cx="0.5" cy="0.5" r="0.8">
+            <stop offset="0%"  stop-color="#fff4d8" stop-opacity="0.98"/>
+            <stop offset="100%" stop-color="#f5d589" stop-opacity="0.75"/>
+          </radialGradient>
+        </defs>
+
+        <!-- axes (y-axis shifted left to x=40 so the outer ellipse no longer crosses it) -->
+        <line x1="40" y1="340" x2="700" y2="340" stroke="#444" stroke-width="1.4" marker-end="url(#envA)"/>
+        <line x1="40" y1="340" x2="40"  y2="40"  stroke="#444" stroke-width="1.4" marker-end="url(#envA)"/>
+
+        <!-- axis labels -->
+        <text x="700" y="362" text-anchor="end" font-family="Fraunces" font-style="italic" font-size="12" fill="#444">ball-plate friction</text>
+        <g transform="translate(20 195) rotate(-90)">
+          <text x="0" y="0" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="12" fill="#444">action delay τ</text>
+        </g>
+
+        <!-- outer envelope: PID + residual -->
+        <ellipse cx="310" cy="215" rx="230" ry="115" fill="url(#envOuter)" stroke="#6643a0" stroke-width="2.2"/>
+        <!-- centered label inside outer ellipse, in the upper region clear of inner -->
+        <text x="310" y="125" text-anchor="middle" font-family="Fraunces" font-size="15" font-weight="700" fill="#5d3a9a">PID + residual</text>
+
+        <!-- inner envelope: PID alone -->
+        <ellipse cx="260" cy="250" rx="105" ry="55" fill="url(#envInner)" stroke="#c4820e" stroke-width="2.2"/>
+        <text x="260" y="254" text-anchor="middle" font-family="Fraunces" font-size="14" font-weight="700" fill="#8d5e0a">PID alone</text>
+
+        <!-- nominal point (inside PID alone, lower-left to leave room for PID alone label) -->
+        <circle cx="215" cy="278" r="5" fill="#003262" stroke="#fff" stroke-width="1.4"/>
+        <line x1="215" y1="284" x2="195" y2="306" stroke="#003262" stroke-width="0.8" stroke-dasharray="2 2"/>
+        <text x="190" y="320" text-anchor="end" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">nominal</text>
+
+        <!-- perturbed point (inside outer, outside inner; label routed BELOW the dot to clear the top labels) -->
+        <circle cx="430" cy="200" r="5" fill="#b41e28" stroke="#fff" stroke-width="1.4"/>
+        <line x1="430" y1="206" x2="470" y2="245" stroke="#b41e28" stroke-width="0.8" stroke-dasharray="2 2"/>
+        <text x="476" y="252" font-family="Fraunces" font-style="italic" font-size="11" font-weight="600" fill="#b41e28">high friction · large delay</text>
+        <text x="476" y="267" font-family="Fraunces" font-style="italic" font-size="10" fill="#888">PID drifts · residual compensates</text>
+
+        <!-- far out-of-distribution point: label routed up-right to use empty top-right area -->
+        <circle cx="615" cy="100" r="5" fill="#777" stroke="#fff" stroke-width="1.4"/>
+        <line x1="615" y1="95" x2="625" y2="75" stroke="#777" stroke-width="0.8" stroke-dasharray="2 2"/>
+        <text x="632" y="64" font-family="Fraunces" font-style="italic" font-size="11" fill="#666">out of training distribution</text>
+        <text x="632" y="78" font-family="Fraunces" font-style="italic" font-size="10" fill="#888">no guarantee for either scheme</text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 2.</span> Operating envelope (schematic). A two-dimensional slice of the seven-dimensional perturbation space, showing the regions in which the PID alone and the PID + residual scheme keep the ball on the plate. The outer envelope matches the domain-randomisation distribution of § 5; outside it neither scheme is guaranteed to track.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 2</span>Markov decision process</h3>
+    <p>
+      The training problem is cast as an episodic Markov decision process (MDP) with
+      state $s_t$, action $a_t$, transition kernel $T(s_{t+1} \mid s_t, a_t)$, and reward
+      $r(s_t, a_t)$. An episode lasts up to $T = 600$ control steps at a $30$ Hz policy
+      rate, for a $20$ s horizon. The episode terminates early if the ball leaves the
+      plate; in that case a drop-terminal reward is applied. The objective is the
+      expected discounted return,
+    </p>
+    <div class="math-block">
+      $$J(\pi_\theta) \;=\; \mathbb{E}_{\pi_\theta} \!\left[ \sum_{t=0}^{T-1} \gamma^t \, r(s_t, a_t) \right], \qquad \gamma = 0.99.$$
+    </div>
+    <p>
+      The state $s_t$ is the full MuJoCo state of the arm and the ball; the policy
+      observes a 12-dimensional projection $o_t$ defined in § 3.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 760 360" style="margin: 0 auto;">
+        <defs>
+          <marker id="rlA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/></marker>
+          <marker id="rlG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#288c5a"/></marker>
+          <linearGradient id="gradEnv" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#fef9ed"/>
+            <stop offset="100%" stop-color="#f5e0b6"/>
+          </linearGradient>
+          <linearGradient id="gradBuf" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#eef3fb"/>
+            <stop offset="100%" stop-color="#bcd1ea"/>
+          </linearGradient>
+          <linearGradient id="gradPol" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#f4e9ff"/>
+            <stop offset="100%" stop-color="#d8c2f0"/>
+          </linearGradient>
+        </defs>
+
+        <!-- ===== Parallel envs (stacked, top-left) ===== -->
+        <g>
+          <!-- 5 stacked envs with parallax offset to suggest 16 -->
+          <g opacity="0.35">
+            <rect x="76" y="76" width="160" height="120" rx="10" fill="url(#gradEnv)" stroke="#c4820e" stroke-width="1.2"/>
+          </g>
+          <g opacity="0.55">
+            <rect x="68" y="68" width="160" height="120" rx="10" fill="url(#gradEnv)" stroke="#c4820e" stroke-width="1.2"/>
+          </g>
+          <g opacity="0.75">
+            <rect x="60" y="60" width="160" height="120" rx="10" fill="url(#gradEnv)" stroke="#c4820e" stroke-width="1.2"/>
+          </g>
+          <g>
+            <rect x="52" y="52" width="160" height="120" rx="10" fill="url(#gradEnv)" stroke="#c4820e" stroke-width="1.8"/>
+            <text x="132" y="78" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="14" fill="#8d5e0a">MuJoCo env</text>
+            <text x="132" y="96" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#8d5e0a">UR7e + plate + ball</text>
+            <text x="132" y="113" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#8d5e0a">+ PID baseline</text>
+            <!-- tiny plate-ball icon -->
+            <g transform="translate(132 142)">
+              <g transform="rotate(-10)">
+                <rect x="-30" y="-2" width="60" height="4" fill="#dcc093" stroke="#a48246" stroke-width="0.7"/>
+                <circle cx="14" cy="-6" r="4" fill="#c83040" stroke="#761018" stroke-width="0.8"/>
+              </g>
+            </g>
+          </g>
+          <text x="132" y="216" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#8d5e0a">× 16 parallel envs</text>
+          <text x="132" y="232" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="10" fill="#888">each with its own DR sample</text>
+        </g>
+
+        <!-- ===== Rollout buffer (center) ===== -->
+        <g>
+          <rect x="290" y="80" width="200" height="160" rx="10" fill="url(#gradBuf)" stroke="#003262" stroke-width="1.8"/>
+          <text x="390" y="102" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="14" fill="#003262">rollout buffer</text>
+          <text x="390" y="118" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">(o<tspan dy="3" font-size="8">t</tspan><tspan dy="-3" font-size="11">, a</tspan><tspan dy="3" font-size="8">t</tspan><tspan dy="-3" font-size="11">, r</tspan><tspan dy="3" font-size="8">t</tspan><tspan dy="-3" font-size="11">, o</tspan><tspan dy="3" font-size="8">t+1</tspan><tspan dy="-3" font-size="11">)</tspan></text>
+          <!-- mini horizontal lines suggesting trajectory rows -->
+          <g stroke="#003262" stroke-width="1.2" opacity="0.55">
+            <line x1="306" y1="138" x2="476" y2="138"/>
+            <line x1="306" y1="152" x2="476" y2="152"/>
+            <line x1="306" y1="166" x2="476" y2="166"/>
+            <line x1="306" y1="180" x2="476" y2="180"/>
+            <line x1="306" y1="194" x2="476" y2="194"/>
+          </g>
+          <!-- tick marks per row -->
+          <g fill="#003262" opacity="0.7">
+            <circle cx="316" cy="138" r="1.5"/><circle cx="346" cy="138" r="1.5"/><circle cx="376" cy="138" r="1.5"/><circle cx="406" cy="138" r="1.5"/><circle cx="436" cy="138" r="1.5"/><circle cx="466" cy="138" r="1.5"/>
+            <circle cx="316" cy="152" r="1.5"/><circle cx="346" cy="152" r="1.5"/><circle cx="376" cy="152" r="1.5"/><circle cx="406" cy="152" r="1.5"/><circle cx="436" cy="152" r="1.5"/><circle cx="466" cy="152" r="1.5"/>
+            <circle cx="316" cy="166" r="1.5"/><circle cx="346" cy="166" r="1.5"/><circle cx="376" cy="166" r="1.5"/><circle cx="406" cy="166" r="1.5"/><circle cx="436" cy="166" r="1.5"/><circle cx="466" cy="166" r="1.5"/>
+            <circle cx="316" cy="180" r="1.5"/><circle cx="346" cy="180" r="1.5"/><circle cx="376" cy="180" r="1.5"/><circle cx="406" cy="180" r="1.5"/><circle cx="436" cy="180" r="1.5"/><circle cx="466" cy="180" r="1.5"/>
+            <circle cx="316" cy="194" r="1.5"/><circle cx="346" cy="194" r="1.5"/><circle cx="376" cy="194" r="1.5"/><circle cx="406" cy="194" r="1.5"/><circle cx="436" cy="194" r="1.5"/><circle cx="466" cy="194" r="1.5"/>
+          </g>
+          <text x="390" y="220" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="10" fill="#003262">on-policy trajectory, 16 envs × T steps</text>
+        </g>
+
+        <!-- ===== Policy + PPO (right) ===== -->
+        <g>
+          <rect x="560" y="80" width="170" height="160" rx="10" fill="url(#gradPol)" stroke="#6643a0" stroke-width="1.8"/>
+          <text x="645" y="102" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="14" fill="#5d3a9a">policy π<tspan dy="3" font-size="10">θ</tspan></text>
+          <text x="645" y="118" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#5d3a9a">+ value head V<tspan dy="3" font-size="9">φ</tspan></text>
+          <!-- mini nn icon: 3 columns of dots with thin edges -->
+          <g stroke="#6643a0" stroke-width="0.4" opacity="0.35">
+            <line x1="585" y1="140" x2="620" y2="148"/><line x1="585" y1="140" x2="620" y2="164"/><line x1="585" y1="140" x2="620" y2="180"/><line x1="585" y1="140" x2="620" y2="196"/>
+            <line x1="585" y1="160" x2="620" y2="148"/><line x1="585" y1="160" x2="620" y2="164"/><line x1="585" y1="160" x2="620" y2="180"/><line x1="585" y1="160" x2="620" y2="196"/>
+            <line x1="585" y1="180" x2="620" y2="148"/><line x1="585" y1="180" x2="620" y2="164"/><line x1="585" y1="180" x2="620" y2="180"/><line x1="585" y1="180" x2="620" y2="196"/>
+            <line x1="585" y1="200" x2="620" y2="148"/><line x1="585" y1="200" x2="620" y2="164"/><line x1="585" y1="200" x2="620" y2="180"/><line x1="585" y1="200" x2="620" y2="196"/>
+            <line x1="620" y1="148" x2="675" y2="168"/><line x1="620" y1="148" x2="675" y2="184"/>
+            <line x1="620" y1="164" x2="675" y2="168"/><line x1="620" y1="164" x2="675" y2="184"/>
+            <line x1="620" y1="180" x2="675" y2="168"/><line x1="620" y1="180" x2="675" y2="184"/>
+            <line x1="620" y1="196" x2="675" y2="168"/><line x1="620" y1="196" x2="675" y2="184"/>
+          </g>
+          <g fill="#6643a0">
+            <circle cx="585" cy="140" r="2.8"/><circle cx="585" cy="160" r="2.8"/><circle cx="585" cy="180" r="2.8"/><circle cx="585" cy="200" r="2.8"/>
+            <circle cx="620" cy="148" r="2.8"/><circle cx="620" cy="164" r="2.8"/><circle cx="620" cy="180" r="2.8"/><circle cx="620" cy="196" r="2.8"/>
+          </g>
+          <g fill="#c4820e">
+            <circle cx="675" cy="168" r="3.4"/><circle cx="675" cy="184" r="3.4"/>
+          </g>
+          <text x="645" y="230" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="10" fill="#5d3a9a">PPO-clipped gradient · GAE</text>
+        </g>
+
+        <!-- ===== Connections ===== -->
+        <!-- envs → buffer (obs/reward) -->
+        <line x1="212" y1="100" x2="288" y2="120" stroke="#003262" stroke-width="2" marker-end="url(#rlA)"/>
+        <text x="250" y="93" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">o<tspan dy="3" font-size="8">t</tspan></text>
+        <line x1="212" y1="138" x2="288" y2="160" stroke="#288c5a" stroke-width="2" marker-end="url(#rlG)"/>
+        <text x="250" y="135" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#288c5a">r<tspan dy="3" font-size="8">t</tspan></text>
+
+        <!-- buffer → policy (PPO update) -->
+        <path d="M 490 160 C 520 160 530 180 558 180" stroke="#6643a0" stroke-width="2" fill="none" marker-end="url(#rlA)"/>
+        <text x="528" y="174" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#5d3a9a">PPO step</text>
+
+        <!-- policy → envs (action loop): from policy TOP curving up and back to front env TOP -->
+        <path d="M 645 80 C 645 28 320 18 132 28 L 132 52" stroke="#003262" stroke-width="1.8" fill="none" marker-end="url(#rlA)"/>
+        <text x="390" y="20" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">action a<tspan dy="3" font-size="8">t</tspan><tspan dy="-3" font-size="11"> ∈ [−1, 1]</tspan><tspan dy="-3" font-size="8">2</tspan><tspan dy="3" font-size="11"> applied in every env</tspan></text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 3.</span> Residual-RL training loop. Sixteen MuJoCo environments run in parallel, each carrying its own domain-randomisation sample and its own PID baseline. The transitions $(o_t, a_t, r_t, o_{t+1})$ are written into the on-policy rollout buffer; after $T$ steps the buffer is consumed by a PPO-clipped gradient step on the policy $\pi_\theta$ and the value head $V_\phi$, and the updated policy is shipped back to all envs.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 3</span>Observation</h3>
+    <p>
+      The policy receives a 12-dimensional observation $o_t \in \mathbb{R}^{12}$
+      concatenated from the following blocks, all expressed in the plate frame $\{P\}$:
+    </p>
+    <dl class="notation-list">
+      <dt>$(x, y)$</dt><dd>ball position in $\{P\}$ (m).</dd>
+      <dt>$(\dot x, \dot y)$</dt><dd>ball velocity in $\{P\}$ (m/s).</dd>
+      <dt>$(x_r, y_r, \dot x_r, \dot y_r)$</dt><dd>reference position and velocity at the current time.</dd>
+      <dt>$(x_r^{+\Delta}, y_r^{+\Delta})$</dt><dd>reference position at a fixed lookahead $\Delta = 0.2$ s.</dd>
+      <dt>roll, pitch</dt><dd>plate tilt angles in $\{W\}$.</dd>
+    </dl>
+    <p>
+      The lookahead lets the policy anticipate target motion. The PID alone trails
+      a moving reference by a lag proportional to the bandwidth ratio between the
+      reference and the closed-loop dynamics, which is visible on circular and
+      figure-of-eight trajectories; the lookahead term allows the residual to
+      compensate this lag without modifying the PID gains.
+    </p>
+
+    <h3 class="section-h"><span class="section-num">§ 4</span>Reward shaping</h3>
+    <p>
+      The per-step reward combines three positive shaping terms and two negative
+      regularisers:
+    </p>
+    <div class="math-block">
+      $$\begin{aligned}
+        r_t \;=\;\;
+          & \textcolor{#288c5a}{w_t\, e^{-\|e_p\| / \sigma_p}}
+          &&\quad \text{tracking} \;(+) \\
+        + & \textcolor{#288c5a}{w_v\, e^{-\|e_v\| / \sigma_v}}
+          &&\quad \text{velocity match} \;(+) \\
+        + & \textcolor{#003262}{w_g \big( \|e_p^{(t-1)}\| - \|e_p^{(t)}\| \big)}
+          &&\quad \text{progress shaping} \;(+) \\
+        - & \textcolor{#b41e28}{w_a\, \|a_t\|^2}
+          &&\quad \text{action magnitude} \;(-) \\
+        - & \textcolor{#b41e28}{w_s\, \|a_t - a_{t-1}\|^2}
+          &&\quad \text{action smoothness} \;(-)
+      \end{aligned}$$
+    </div>
+    <ul style="color:var(--text);margin:1rem 0 1.5rem 1.25rem;">
+      <li>The <strong>tracking</strong> term is an exponential bonus on the position
+      error norm with scale $\sigma_p = 0.05$ m.</li>
+      <li>The <strong>velocity-match</strong> term rewards ball velocity tracking the
+      reference velocity, with scale $\sigma_v = 0.20$ m/s.</li>
+      <li>The <strong>progress</strong> term is a potential-based shaping bonus
+      proportional to the reduction in $\|e_p\|$ between consecutive steps; it
+      densifies the reward signal when the ball is far from the reference.</li>
+      <li>The <strong>action-magnitude</strong> penalty regularises the residual
+      norm; with $\pi_\theta \equiv 0$ the term is identically zero.</li>
+      <li>The <strong>smoothness</strong> penalty regularises the temporal
+      difference of the residual to suppress high-frequency oscillation.</li>
+    </ul>
+    <p>
+      A drop event terminates the episode and applies a large terminal penalty
+      $-w_d \cdot (\text{steps remaining}) / T$, so dropping the ball early in an episode
+      is punished more heavily than dropping it late.
+    </p>
+    <p>
+      The deployed weights are
+      $w_t = 1.0$, $w_v = 0.3$, $w_g = 0.5$, $w_a = 0.01$, $w_s = 0.05$, $w_d = 100$.
+    </p>
+
+    <h3 id="sec-dr" class="section-h"><span class="section-num">§ 5</span>Domain randomization</h3>
+    <p>
+      Each training episode samples seven physical and sensing parameters uniformly
+      within ranges that bracket the values seen on the real hardware. The policy is
+      forced to perform across the full range, which produces robustness to whichever
+      values the real system actually exhibits.
+    </p>
+    <dl class="notation-list">
+      <dt>ball mass</dt><dd>$[2.0, 4.0]$ g (ITTF nominal $2.7$ g).</dd>
+      <dt>ball-plate friction</dt><dd>$[0.30, 0.70]$.</dd>
+      <dt>plate-air friction</dt><dd>$[0.30, 0.80]$.</dd>
+      <dt>initial ball offset</dt><dd>$[0, 2]$ cm radius from plate centre.</dd>
+      <dt>gravity scale</dt><dd>$\pm 2 \%$ multiplicative perturbation on $g$.</dd>
+      <dt>observation noise</dt><dd>$0$–$3$ mm Gaussian standard deviation on $(x, y)$.</dd>
+      <dt>action delay</dt><dd>$[30, 150]$ ms (camera + ROS + trajectory command latency).</dd>
+    </dl>
+    <p>
+      Action delay is implemented as a circular buffer of length
+      $\lceil \tau / \Delta t \rceil$ where $\tau$ is the sampled latency and $\Delta t$ is
+      the policy step; the action applied at step $t$ is the action requested
+      $\lceil \tau / \Delta t \rceil$ steps earlier.
+    </p>
+
+    <h3 id="sec-training" class="section-h"><span class="section-num">§ 6</span>Training algorithm</h3>
+    <p>
+      The policy is trained with Proximal Policy Optimization (PPO), an on-policy
+      policy-gradient method that stabilises updates by clipping the importance-sampling
+      ratio between the new and old policies. With $r_t(\theta) = \pi_\theta(a_t \mid o_t) /
+      \pi_{\theta_{\text{old}}}(a_t \mid o_t)$ and the generalised advantage estimate
+      $\hat A_t$, the surrogate objective is
+    </p>
+    <div class="math-block">
+      $$\mathcal{L}^{\mathrm{CLIP}}(\theta) \;=\; \mathbb{E}_t \!\left[ \min\!\big( r_t(\theta)\, \hat A_t, \;\; \mathrm{clip}(r_t(\theta), 1 - \epsilon, 1 + \epsilon)\, \hat A_t \big) \right],$$
+    </div>
+    <p>
+      with clip range $\epsilon = 0.1$. The advantages are computed by Generalised
+      Advantage Estimation (GAE) with parameter $\lambda = 0.95$. Both policy and value
+      networks are Multi-Layer Perceptrons (MLP) with two hidden layers of $256$ units
+      and $\tanh$ activations. Sixteen MuJoCo environments run in parallel via the
+      Stable-Baselines 3 vectorised wrapper. The learning rate decays linearly from
+      $10^{-4}$ to $10^{-5}$ and the entropy coefficient from $5 \cdot 10^{-3}$ to
+      $5 \cdot 10^{-4}$ over the full training schedule. The training curve and the
+      benchmark are reported on the <a href="results.html">results page</a>.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 720 360" style="margin: 0 auto;">
+        <defs>
+          <linearGradient id="weightG" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"  stop-color="#cdb6ec" stop-opacity="0.6"/>
+            <stop offset="100%" stop-color="#6643a0" stop-opacity="0.85"/>
+          </linearGradient>
+        </defs>
+
+        <!-- column x-positions -->
+        <!-- input: x=110, hidden1: x=290, hidden2: x=470, output: x=620 -->
+
+        <!-- column labels (top) -->
+        <g font-family="Fraunces" font-style="italic" font-size="12">
+          <text x="110" y="32" text-anchor="middle" fill="#444">input</text>
+          <text x="110" y="48" text-anchor="middle" font-size="10" fill="#888">o<tspan dy="3" font-size="8">t</tspan><tspan dy="-3" font-size="10"> ∈ ℝ</tspan><tspan dy="-3" font-size="8">12</tspan></text>
+          <text x="290" y="32" text-anchor="middle" fill="#5d3a9a">hidden 1</text>
+          <text x="290" y="48" text-anchor="middle" font-size="10" fill="#888">256 · tanh</text>
+          <text x="470" y="32" text-anchor="middle" fill="#5d3a9a">hidden 2</text>
+          <text x="470" y="48" text-anchor="middle" font-size="10" fill="#888">256 · tanh</text>
+          <text x="620" y="32" text-anchor="middle" fill="#8d5e0a">output</text>
+          <text x="620" y="48" text-anchor="middle" font-size="10" fill="#888">2 · tanh</text>
+        </g>
+
+        <!-- edges: input(12) → hidden1(10 shown) -->
+        <g stroke="url(#weightG)" stroke-width="0.55" fill="none" opacity="0.5">
+          <!-- input dots at y = 70 + i*20 for i=0..11; hidden dots at y = 75 + i*22 for i=0..9 -->
+          <line x1="110" y1="70"  x2="290" y2="75"/><line x1="110" y1="70"  x2="290" y2="97"/><line x1="110" y1="70"  x2="290" y2="119"/><line x1="110" y1="70"  x2="290" y2="141"/><line x1="110" y1="70"  x2="290" y2="163"/><line x1="110" y1="70"  x2="290" y2="185"/><line x1="110" y1="70"  x2="290" y2="207"/><line x1="110" y1="70"  x2="290" y2="229"/><line x1="110" y1="70"  x2="290" y2="251"/><line x1="110" y1="70"  x2="290" y2="273"/>
+          <line x1="110" y1="90"  x2="290" y2="75"/><line x1="110" y1="90"  x2="290" y2="97"/><line x1="110" y1="90"  x2="290" y2="119"/><line x1="110" y1="90"  x2="290" y2="141"/><line x1="110" y1="90"  x2="290" y2="163"/><line x1="110" y1="90"  x2="290" y2="185"/><line x1="110" y1="90"  x2="290" y2="207"/><line x1="110" y1="90"  x2="290" y2="229"/><line x1="110" y1="90"  x2="290" y2="251"/><line x1="110" y1="90"  x2="290" y2="273"/>
+          <line x1="110" y1="110" x2="290" y2="75"/><line x1="110" y1="110" x2="290" y2="97"/><line x1="110" y1="110" x2="290" y2="119"/><line x1="110" y1="110" x2="290" y2="141"/><line x1="110" y1="110" x2="290" y2="163"/><line x1="110" y1="110" x2="290" y2="185"/><line x1="110" y1="110" x2="290" y2="207"/><line x1="110" y1="110" x2="290" y2="229"/><line x1="110" y1="110" x2="290" y2="251"/><line x1="110" y1="110" x2="290" y2="273"/>
+          <line x1="110" y1="130" x2="290" y2="75"/><line x1="110" y1="130" x2="290" y2="97"/><line x1="110" y1="130" x2="290" y2="119"/><line x1="110" y1="130" x2="290" y2="141"/><line x1="110" y1="130" x2="290" y2="163"/><line x1="110" y1="130" x2="290" y2="185"/><line x1="110" y1="130" x2="290" y2="207"/><line x1="110" y1="130" x2="290" y2="229"/><line x1="110" y1="130" x2="290" y2="251"/><line x1="110" y1="130" x2="290" y2="273"/>
+          <line x1="110" y1="150" x2="290" y2="75"/><line x1="110" y1="150" x2="290" y2="97"/><line x1="110" y1="150" x2="290" y2="119"/><line x1="110" y1="150" x2="290" y2="141"/><line x1="110" y1="150" x2="290" y2="163"/><line x1="110" y1="150" x2="290" y2="185"/><line x1="110" y1="150" x2="290" y2="207"/><line x1="110" y1="150" x2="290" y2="229"/><line x1="110" y1="150" x2="290" y2="251"/><line x1="110" y1="150" x2="290" y2="273"/>
+          <line x1="110" y1="170" x2="290" y2="75"/><line x1="110" y1="170" x2="290" y2="97"/><line x1="110" y1="170" x2="290" y2="119"/><line x1="110" y1="170" x2="290" y2="141"/><line x1="110" y1="170" x2="290" y2="163"/><line x1="110" y1="170" x2="290" y2="185"/><line x1="110" y1="170" x2="290" y2="207"/><line x1="110" y1="170" x2="290" y2="229"/><line x1="110" y1="170" x2="290" y2="251"/><line x1="110" y1="170" x2="290" y2="273"/>
+          <line x1="110" y1="190" x2="290" y2="75"/><line x1="110" y1="190" x2="290" y2="97"/><line x1="110" y1="190" x2="290" y2="119"/><line x1="110" y1="190" x2="290" y2="141"/><line x1="110" y1="190" x2="290" y2="163"/><line x1="110" y1="190" x2="290" y2="185"/><line x1="110" y1="190" x2="290" y2="207"/><line x1="110" y1="190" x2="290" y2="229"/><line x1="110" y1="190" x2="290" y2="251"/><line x1="110" y1="190" x2="290" y2="273"/>
+          <line x1="110" y1="210" x2="290" y2="75"/><line x1="110" y1="210" x2="290" y2="97"/><line x1="110" y1="210" x2="290" y2="119"/><line x1="110" y1="210" x2="290" y2="141"/><line x1="110" y1="210" x2="290" y2="163"/><line x1="110" y1="210" x2="290" y2="185"/><line x1="110" y1="210" x2="290" y2="207"/><line x1="110" y1="210" x2="290" y2="229"/><line x1="110" y1="210" x2="290" y2="251"/><line x1="110" y1="210" x2="290" y2="273"/>
+          <line x1="110" y1="230" x2="290" y2="75"/><line x1="110" y1="230" x2="290" y2="97"/><line x1="110" y1="230" x2="290" y2="119"/><line x1="110" y1="230" x2="290" y2="141"/><line x1="110" y1="230" x2="290" y2="163"/><line x1="110" y1="230" x2="290" y2="185"/><line x1="110" y1="230" x2="290" y2="207"/><line x1="110" y1="230" x2="290" y2="229"/><line x1="110" y1="230" x2="290" y2="251"/><line x1="110" y1="230" x2="290" y2="273"/>
+          <line x1="110" y1="250" x2="290" y2="75"/><line x1="110" y1="250" x2="290" y2="97"/><line x1="110" y1="250" x2="290" y2="119"/><line x1="110" y1="250" x2="290" y2="141"/><line x1="110" y1="250" x2="290" y2="163"/><line x1="110" y1="250" x2="290" y2="185"/><line x1="110" y1="250" x2="290" y2="207"/><line x1="110" y1="250" x2="290" y2="229"/><line x1="110" y1="250" x2="290" y2="251"/><line x1="110" y1="250" x2="290" y2="273"/>
+          <line x1="110" y1="270" x2="290" y2="75"/><line x1="110" y1="270" x2="290" y2="97"/><line x1="110" y1="270" x2="290" y2="119"/><line x1="110" y1="270" x2="290" y2="141"/><line x1="110" y1="270" x2="290" y2="163"/><line x1="110" y1="270" x2="290" y2="185"/><line x1="110" y1="270" x2="290" y2="207"/><line x1="110" y1="270" x2="290" y2="229"/><line x1="110" y1="270" x2="290" y2="251"/><line x1="110" y1="270" x2="290" y2="273"/>
+          <line x1="110" y1="290" x2="290" y2="75"/><line x1="110" y1="290" x2="290" y2="97"/><line x1="110" y1="290" x2="290" y2="119"/><line x1="110" y1="290" x2="290" y2="141"/><line x1="110" y1="290" x2="290" y2="163"/><line x1="110" y1="290" x2="290" y2="185"/><line x1="110" y1="290" x2="290" y2="207"/><line x1="110" y1="290" x2="290" y2="229"/><line x1="110" y1="290" x2="290" y2="251"/><line x1="110" y1="290" x2="290" y2="273"/>
+        </g>
+
+        <!-- edges: hidden1 → hidden2 -->
+        <g stroke="#6643a0" stroke-width="0.5" fill="none" opacity="0.32">
+          <line x1="290" y1="75"  x2="470" y2="75"/><line x1="290" y1="75"  x2="470" y2="97"/><line x1="290" y1="75"  x2="470" y2="119"/><line x1="290" y1="75"  x2="470" y2="141"/><line x1="290" y1="75"  x2="470" y2="163"/><line x1="290" y1="75"  x2="470" y2="185"/><line x1="290" y1="75"  x2="470" y2="207"/><line x1="290" y1="75"  x2="470" y2="229"/><line x1="290" y1="75"  x2="470" y2="251"/><line x1="290" y1="75"  x2="470" y2="273"/>
+          <line x1="290" y1="97"  x2="470" y2="75"/><line x1="290" y1="97"  x2="470" y2="97"/><line x1="290" y1="97"  x2="470" y2="119"/><line x1="290" y1="97"  x2="470" y2="141"/><line x1="290" y1="97"  x2="470" y2="163"/><line x1="290" y1="97"  x2="470" y2="185"/><line x1="290" y1="97"  x2="470" y2="207"/><line x1="290" y1="97"  x2="470" y2="229"/><line x1="290" y1="97"  x2="470" y2="251"/><line x1="290" y1="97"  x2="470" y2="273"/>
+          <line x1="290" y1="119" x2="470" y2="75"/><line x1="290" y1="119" x2="470" y2="97"/><line x1="290" y1="119" x2="470" y2="119"/><line x1="290" y1="119" x2="470" y2="141"/><line x1="290" y1="119" x2="470" y2="163"/><line x1="290" y1="119" x2="470" y2="185"/><line x1="290" y1="119" x2="470" y2="207"/><line x1="290" y1="119" x2="470" y2="229"/><line x1="290" y1="119" x2="470" y2="251"/><line x1="290" y1="119" x2="470" y2="273"/>
+          <line x1="290" y1="141" x2="470" y2="75"/><line x1="290" y1="141" x2="470" y2="97"/><line x1="290" y1="141" x2="470" y2="119"/><line x1="290" y1="141" x2="470" y2="141"/><line x1="290" y1="141" x2="470" y2="163"/><line x1="290" y1="141" x2="470" y2="185"/><line x1="290" y1="141" x2="470" y2="207"/><line x1="290" y1="141" x2="470" y2="229"/><line x1="290" y1="141" x2="470" y2="251"/><line x1="290" y1="141" x2="470" y2="273"/>
+          <line x1="290" y1="163" x2="470" y2="75"/><line x1="290" y1="163" x2="470" y2="97"/><line x1="290" y1="163" x2="470" y2="119"/><line x1="290" y1="163" x2="470" y2="141"/><line x1="290" y1="163" x2="470" y2="163"/><line x1="290" y1="163" x2="470" y2="185"/><line x1="290" y1="163" x2="470" y2="207"/><line x1="290" y1="163" x2="470" y2="229"/><line x1="290" y1="163" x2="470" y2="251"/><line x1="290" y1="163" x2="470" y2="273"/>
+          <line x1="290" y1="185" x2="470" y2="75"/><line x1="290" y1="185" x2="470" y2="97"/><line x1="290" y1="185" x2="470" y2="119"/><line x1="290" y1="185" x2="470" y2="141"/><line x1="290" y1="185" x2="470" y2="163"/><line x1="290" y1="185" x2="470" y2="185"/><line x1="290" y1="185" x2="470" y2="207"/><line x1="290" y1="185" x2="470" y2="229"/><line x1="290" y1="185" x2="470" y2="251"/><line x1="290" y1="185" x2="470" y2="273"/>
+          <line x1="290" y1="207" x2="470" y2="75"/><line x1="290" y1="207" x2="470" y2="97"/><line x1="290" y1="207" x2="470" y2="119"/><line x1="290" y1="207" x2="470" y2="141"/><line x1="290" y1="207" x2="470" y2="163"/><line x1="290" y1="207" x2="470" y2="185"/><line x1="290" y1="207" x2="470" y2="207"/><line x1="290" y1="207" x2="470" y2="229"/><line x1="290" y1="207" x2="470" y2="251"/><line x1="290" y1="207" x2="470" y2="273"/>
+          <line x1="290" y1="229" x2="470" y2="75"/><line x1="290" y1="229" x2="470" y2="97"/><line x1="290" y1="229" x2="470" y2="119"/><line x1="290" y1="229" x2="470" y2="141"/><line x1="290" y1="229" x2="470" y2="163"/><line x1="290" y1="229" x2="470" y2="185"/><line x1="290" y1="229" x2="470" y2="207"/><line x1="290" y1="229" x2="470" y2="229"/><line x1="290" y1="229" x2="470" y2="251"/><line x1="290" y1="229" x2="470" y2="273"/>
+          <line x1="290" y1="251" x2="470" y2="75"/><line x1="290" y1="251" x2="470" y2="97"/><line x1="290" y1="251" x2="470" y2="119"/><line x1="290" y1="251" x2="470" y2="141"/><line x1="290" y1="251" x2="470" y2="163"/><line x1="290" y1="251" x2="470" y2="185"/><line x1="290" y1="251" x2="470" y2="207"/><line x1="290" y1="251" x2="470" y2="229"/><line x1="290" y1="251" x2="470" y2="251"/><line x1="290" y1="251" x2="470" y2="273"/>
+          <line x1="290" y1="273" x2="470" y2="75"/><line x1="290" y1="273" x2="470" y2="97"/><line x1="290" y1="273" x2="470" y2="119"/><line x1="290" y1="273" x2="470" y2="141"/><line x1="290" y1="273" x2="470" y2="163"/><line x1="290" y1="273" x2="470" y2="185"/><line x1="290" y1="273" x2="470" y2="207"/><line x1="290" y1="273" x2="470" y2="229"/><line x1="290" y1="273" x2="470" y2="251"/><line x1="290" y1="273" x2="470" y2="273"/>
+        </g>
+
+        <!-- edges: hidden2 → output -->
+        <g stroke="#c4820e" stroke-width="0.75" fill="none" opacity="0.55">
+          <line x1="470" y1="75"  x2="620" y2="160"/><line x1="470" y1="75"  x2="620" y2="200"/>
+          <line x1="470" y1="97"  x2="620" y2="160"/><line x1="470" y1="97"  x2="620" y2="200"/>
+          <line x1="470" y1="119" x2="620" y2="160"/><line x1="470" y1="119" x2="620" y2="200"/>
+          <line x1="470" y1="141" x2="620" y2="160"/><line x1="470" y1="141" x2="620" y2="200"/>
+          <line x1="470" y1="163" x2="620" y2="160"/><line x1="470" y1="163" x2="620" y2="200"/>
+          <line x1="470" y1="185" x2="620" y2="160"/><line x1="470" y1="185" x2="620" y2="200"/>
+          <line x1="470" y1="207" x2="620" y2="160"/><line x1="470" y1="207" x2="620" y2="200"/>
+          <line x1="470" y1="229" x2="620" y2="160"/><line x1="470" y1="229" x2="620" y2="200"/>
+          <line x1="470" y1="251" x2="620" y2="160"/><line x1="470" y1="251" x2="620" y2="200"/>
+          <line x1="470" y1="273" x2="620" y2="160"/><line x1="470" y1="273" x2="620" y2="200"/>
+        </g>
+
+        <!-- input nodes (12 dots) -->
+        <g fill="#c4820e" stroke="#8d5e0a" stroke-width="0.8">
+          <circle cx="110" cy="70"  r="4.5"/><circle cx="110" cy="90"  r="4.5"/><circle cx="110" cy="110" r="4.5"/><circle cx="110" cy="130" r="4.5"/><circle cx="110" cy="150" r="4.5"/><circle cx="110" cy="170" r="4.5"/><circle cx="110" cy="190" r="4.5"/><circle cx="110" cy="210" r="4.5"/><circle cx="110" cy="230" r="4.5"/><circle cx="110" cy="250" r="4.5"/><circle cx="110" cy="270" r="4.5"/><circle cx="110" cy="290" r="4.5"/>
+        </g>
+
+        <!-- hidden1 nodes (10 dots representative of 256) -->
+        <g fill="#6643a0" stroke="#3d1d72" stroke-width="0.8">
+          <circle cx="290" cy="75"  r="5"/><circle cx="290" cy="97"  r="5"/><circle cx="290" cy="119" r="5"/><circle cx="290" cy="141" r="5"/><circle cx="290" cy="163" r="5"/><circle cx="290" cy="185" r="5"/><circle cx="290" cy="207" r="5"/><circle cx="290" cy="229" r="5"/><circle cx="290" cy="251" r="5"/><circle cx="290" cy="273" r="5"/>
+        </g>
+        <!-- in-column ellipsis: three tiny dots between rows 5 and 6, with a small white background to clear the underlying edges -->
+        <g>
+          <rect x="284" y="170" width="12" height="10" fill="#fff" stroke="none"/>
+          <circle cx="290" cy="172" r="1.6" fill="#5d3a9a"/>
+          <circle cx="290" cy="176" r="1.6" fill="#5d3a9a"/>
+          <circle cx="290" cy="180" r="1.6" fill="#5d3a9a"/>
+        </g>
+        <text x="290" y="306" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="10" fill="#888">⋯ 246 more units ⋯</text>
+
+        <!-- hidden2 nodes (10 dots representative of 256) -->
+        <g fill="#6643a0" stroke="#3d1d72" stroke-width="0.8">
+          <circle cx="470" cy="75"  r="5"/><circle cx="470" cy="97"  r="5"/><circle cx="470" cy="119" r="5"/><circle cx="470" cy="141" r="5"/><circle cx="470" cy="163" r="5"/><circle cx="470" cy="185" r="5"/><circle cx="470" cy="207" r="5"/><circle cx="470" cy="229" r="5"/><circle cx="470" cy="251" r="5"/><circle cx="470" cy="273" r="5"/>
+        </g>
+        <g>
+          <rect x="464" y="170" width="12" height="10" fill="#fff" stroke="none"/>
+          <circle cx="470" cy="172" r="1.6" fill="#5d3a9a"/>
+          <circle cx="470" cy="176" r="1.6" fill="#5d3a9a"/>
+          <circle cx="470" cy="180" r="1.6" fill="#5d3a9a"/>
+        </g>
+        <text x="470" y="306" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="10" fill="#888">⋯ 246 more units ⋯</text>
+
+        <!-- output nodes (2 dots, larger, gold) -->
+        <g fill="#c4820e" stroke="#8d5e0a" stroke-width="1">
+          <circle cx="620" cy="160" r="7"/>
+          <circle cx="620" cy="200" r="7"/>
+        </g>
+        <text x="638" y="164" font-family="Fraunces" font-style="italic" font-size="12" fill="#8d5e0a">a<tspan dy="3" font-size="9">t,x</tspan></text>
+        <text x="638" y="204" font-family="Fraunces" font-style="italic" font-size="12" fill="#8d5e0a">a<tspan dy="3" font-size="9">t,y</tspan></text>
+
+        <!-- tanh activation hint as a small inset curve -->
+        <g transform="translate(370 320)">
+          <rect x="-32" y="-15" width="64" height="22" rx="4" fill="#fef9ed" stroke="#aaa" stroke-width="0.6"/>
+          <path d="M -22 0 C -16 0 -10 -8 0 -8 C 10 -8 16 0 22 0" fill="none" stroke="#5d3a9a" stroke-width="1.4"/>
+          <text x="0" y="-18" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="9" fill="#888">tanh</text>
+        </g>
+      </svg>
+      <figcaption><span class="fig-num">Figure 4.</span> Policy network $\pi_\theta$. The 12-dimensional observation is mapped through two fully connected layers of $256$ units with $\tanh$ activations to a 2-dimensional output, also passed through $\tanh$ so that $a_t \in [-1, 1]^2$. Only ten representative units per hidden layer are drawn; the value head $V_\phi$ shares the same topology.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 7</span>Notation</h3>
+    <dl class="notation-list">
+      <dt>$o_t \in \mathbb{R}^{12}$</dt><dd>policy observation.</dd>
+      <dt>$\pi_\theta : \mathbb{R}^{12} \to [-1, 1]^2$</dt><dd>policy network.</dd>
+      <dt>$a_t \in [-1, 1]^2$</dt><dd>residual action (before scaling).</dd>
+      <dt>$r_t$</dt><dd>per-step reward.</dd>
+      <dt>$\gamma = 0.99$</dt><dd>discount factor.</dd>
+      <dt>$\lambda = 0.95$</dt><dd>GAE parameter.</dd>
+      <dt>$\epsilon = 0.1$</dt><dd>PPO clip range.</dd>
+      <dt>MDP, MLP, GAE</dt><dd>Markov decision process, multi-layer perceptron, generalised advantage estimation.</dd>
+    </dl>
+
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 8</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Schulman, J., Wolski, F., Dhariwal, P., Radford, A., Klimov, O.</span> (2017).
+          <span class="bib-title">Proximal policy optimization algorithms</span>.
+          <span class="bib-venue">arXiv:1707.06347</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1707.06347" target="_blank" rel="noopener">arxiv.org/abs/1707.06347</a>
+        </li>
+        <li>
+          <span class="bib-authors">Johannink, T., Bahl, S., Nair, A., Luo, J., Kumar, A., Loskyll, M., Aparicio Ojea, J., Solowjow, E., Levine, S.</span> (2019).
+          <span class="bib-title">Residual reinforcement learning for robot control</span>.
+          <span class="bib-venue">IEEE ICRA, pp. 6023–6029</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1812.03201" target="_blank" rel="noopener">arxiv.org/abs/1812.03201</a>
+        </li>
+        <li>
+          <span class="bib-authors">Silver, T., Allen, K. R., Tenenbaum, J., Kaelbling, L. P.</span> (2018).
+          <span class="bib-title">Residual policy learning</span>.
+          <span class="bib-venue">arXiv:1812.06298</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1812.06298" target="_blank" rel="noopener">arxiv.org/abs/1812.06298</a>
+        </li>
+        <li>
+          <span class="bib-authors">Sutton, R. S., Barto, A. G.</span> (2018).
+          <span class="bib-title">Reinforcement Learning: An Introduction</span> (2nd ed.).
+          <span class="bib-venue">MIT Press</span>.
+          <a class="bib-link" href="https://mitpress.mit.edu/9780262039246/reinforcement-learning/" target="_blank" rel="noopener">mitpress.mit.edu</a>
+        </li>
+        <li>
+          <span class="bib-authors">OpenAI: Andrychowicz, M., Baker, B., Chociej, M., et al.</span> (2020).
+          <span class="bib-title">Learning dexterous in-hand manipulation</span>.
+          <span class="bib-venue">International Journal of Robotics Research, 39(1), 3–20</span>.
+          <a class="bib-link" href="https://doi.org/10.1177/0278364919887447" target="_blank" rel="noopener">doi.org/10.1177/0278364919887447</a>
+        </li>
+        <li>
+          <span class="bib-authors">Raffin, A., Hill, A., Gleave, A., Kanervisto, A., Ernestus, M., Dormann, N.</span> (2021).
+          <span class="bib-title">Stable-Baselines3: reliable reinforcement learning implementations</span>.
+          <span class="bib-venue">Journal of Machine Learning Research, 22(268), 1–8</span>.
+          <a class="bib-link" href="https://jmlr.org/papers/v22/20-1364.html" target="_blank" rel="noopener">jmlr.org/papers/v22/20-1364.html</a>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

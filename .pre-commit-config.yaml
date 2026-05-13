@@ -1,0 +1,51 @@
+# Pre-commit hooks for the ball-on-plate monorepo.
+#
+# Install once per checkout:
+#     uv run pre-commit install
+#
+# Run all hooks ad-hoc:
+#     uv run pre-commit run --all-files
+#
+# Bump pinned revisions:
+#     uv run pre-commit autoupdate
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # ROS launch / param YAMLs are validated by their own tooling; .rviz
+        # files are YAML-like but not strict YAML.
+        exclude: '\.rviz$|/ros2_ws/'
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # 1 MiB ceiling: catches accidental media commits while allowing
+        # the bundled UR7e URDF (~50 KiB) and uv.lock (~500 KiB). The
+        # website ships short hardware demo clips that are intentionally
+        # in-tree; skip them here.
+        args: ['--maxkb=1024']
+        exclude: '\.(mp4|webm|mov)$'
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Static type-check of the domain library. Local hook so mypy resolves
+  # against the synced uv venv (ballplate, numpy, scipy stubs, ...) rather
+  # than a pre-commit-isolated env that wouldn't see workspace members.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (ballplate, strict)
+        entry: uv run --no-sync mypy ballplate/src/ballplate
+        language: system
+        types: [python]
+        pass_filenames: false

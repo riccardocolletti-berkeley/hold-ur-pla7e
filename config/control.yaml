@@ -1,0 +1,11 @@
+# =============================================================================
+# Control configuration shared between simulator and real-robot backends.
+# Joint indices use the canonical UR ordering:
+#   0 shoulder_pan, 1 shoulder_lift, 2 elbow,
+#   3 wrist_1,      4 wrist_2,       5 wrist_3.
+# =============================================================================
+
+# Indices held fixed at home_joints during a run. The default freezes the
+# upper-arm chain so only the wrist actuates the plate, which removes
+# upper-arm dynamics from the bring-up loop.
+locked_joints: [0, 1, 2]

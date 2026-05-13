@@ -1,0 +1,23 @@
+# =============================================================================
+# Reference trajectory. Loaded by every node that needs to know what path
+# the controller is tracking:
+#
+#   ball_balance_controller/launch/balance.launch.py
+#   ball_balance_controller/launch/mpc_balance.launch.py
+#   ball_tracker_ros/launch/tracker_launch.py
+#
+# The /** wildcard makes every node that declares these parameters pick
+# them up, regardless of node name, so the trajectory is edited in one
+# place.
+#
+# Allowed shapes: stationary | circle | figure8 | drawn.
+# =============================================================================
+
+/**:
+  ros__parameters:
+    reference_shape:    "drawn"
+    reference_radius_m: 0.15
+    reference_period_s: 30.00
+    hold_x_m:           0.0
+    hold_y_m:           0.0
+    drawn_file:         "/home/cc/ee106a/sp26/class/ee106a-acq/eecs_proj/designer/trajectories/my_trajectory.json"

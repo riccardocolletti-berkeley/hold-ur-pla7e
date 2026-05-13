@@ -1,0 +1,10 @@
+# Domain randomization ranges. Re-sampled at every episode reset.
+# Each entry is `[min, max]`; uniform sampling inside the interval.
+
+ball_mass:        [0.0020, 0.0040]   # kg (ITTF nominal 0.0027)
+ball_friction:    [0.30, 0.70]
+plate_friction:   [0.30, 0.80]
+ball_init_radius: [0.00, 0.020]      # m: random offset magnitude on plate
+gravity_scale:    [0.98, 1.02]       # multiplicative perturbation on g
+obs_noise_std:    [0.000, 0.003]     # m: vision-scale Gaussian position noise
+action_delay_ms:  [30, 150]          # camera + ROS + trajectory command latency

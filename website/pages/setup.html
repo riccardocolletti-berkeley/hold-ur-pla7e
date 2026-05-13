@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Setup · Hold UR Pla7e</title>
+  <meta name="description" content="Hardware setup of the ball-on-plate testbed: UR7e arm, acrylic plate, ping-pong ball, RealSense overhead camera, ArUco fiducials, and the ROS 2 stack." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Hardware and conventions</p>
+      <h1>Setup</h1>
+      <p class="lead">The hardware, reference frames, and symbols used throughout the rest of the site.</p>
+    </div>
+  </header>
+
+  <section class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 1</span>Reference frames</h3>
+    <p>
+      Two right-handed Cartesian frames are used throughout. A world frame attached to
+      the UR7e base, and a plate frame attached to the moving plate.
+    </p>
+
+    <div class="frames-layout">
+      <div class="frames-cards">
+
+        <div class="frame-card frame-world">
+          <div class="frame-icon">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 34 L8 8"/>
+              <path d="M5 12 L8 8 L11 12"/>
+              <path d="M8 34 L32 34"/>
+              <path d="M28 31 L32 34 L28 37"/>
+              <path d="M8 34 L20 24"/>
+              <path d="M20 28 L20 24 L16 24"/>
+            </svg>
+          </div>
+          <div class="frame-body">
+            <span class="frame-tag">$\{W\}$ &middot; world</span>
+            <h4>World frame</h4>
+            <p>
+              Fixed at the UR7e base. $\hat z_W$ points up against gravity.
+              The manipulator Jacobian, the joint-state stream and all rigid-body
+              transforms reported by the arm controller live in $\{W\}$.
+            </p>
+          </div>
+        </div>
+
+        <div class="frame-card frame-plate">
+          <div class="frame-icon">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 28 L20 22 L36 28 L20 34 Z"/>
+              <circle cx="20" cy="28" r="1.6" fill="currentColor"/>
+              <path d="M20 28 L32 24"/>
+              <path d="M28.5 21 L32 24 L29.5 27"/>
+              <path d="M20 28 L20 12"/>
+              <path d="M17 15 L20 12 L23 15"/>
+            </svg>
+          </div>
+          <div class="frame-body">
+            <span class="frame-tag">$\{P\}$ &middot; plate</span>
+            <h4>Plate frame</h4>
+            <p>
+              Origin at the geometric centre of the plate. $\hat x_P$ runs along the
+              plate's right edge as seen from the overhead camera, $\hat y_P$ along
+              the upper edge, $\hat z_P$ along the plate normal. $\{P\}$ rotates with
+              the wrist; the position of its origin in $\{W\}$ depends on the
+              upper-arm joints.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <figure class="fig fig-arm">
+        <svg class="diagram" viewBox="0 0 360 340" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="axW" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+            </marker>
+            <marker id="axP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4820e"/>
+            </marker>
+            <linearGradient id="armLink" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#cfcfcf"/>
+              <stop offset="100%" stop-color="#a4a4a4"/>
+            </linearGradient>
+          </defs>
+
+          <!-- floor reference -->
+          <line x1="20" y1="305" x2="340" y2="305" stroke="#bbb" stroke-width="1.3" stroke-dasharray="5 4"/>
+
+          <!-- base of the arm -->
+          <ellipse cx="95" cy="303" rx="40" ry="6" fill="#666"/>
+          <rect x="65" y="260" width="60" height="44" rx="6" fill="#dadada" stroke="#888" stroke-width="1.2"/>
+          <ellipse cx="95" cy="260" rx="30" ry="6" fill="#bbbbbb" stroke="#888" stroke-width="1.2"/>
+
+          <!-- shoulder cylinder -->
+          <circle cx="95" cy="235" r="16" fill="#003262" stroke="#001a40" stroke-width="1.5"/>
+          <circle cx="95" cy="235" r="6" fill="#fdb515"/>
+
+          <!-- upper arm (shoulder → elbow) -->
+          <rect x="89" y="155" width="12" height="80" fill="url(#armLink)" stroke="#777" stroke-width="1"/>
+
+          <!-- elbow -->
+          <circle cx="95" cy="155" r="14" fill="#003262" stroke="#001a40" stroke-width="1.5"/>
+
+          <!-- forearm (elbow → wrist cluster) extending to the right -->
+          <rect x="95" y="149" width="155" height="12" fill="url(#armLink)" stroke="#777" stroke-width="1"/>
+
+          <!-- wrist cluster (the plate's tool-flange end is centred on x = 250) -->
+          <circle cx="235" cy="155" r="11" fill="#4a7fa8" stroke="#003262" stroke-width="1.2"/>
+          <circle cx="250" cy="155" r="9"  fill="#6643a0" stroke="#3d1d72" stroke-width="1.2"/>
+
+          <!-- adapter: short vertical post linking the wrist flange to the plate bottom -->
+          <rect x="246" y="128" width="8" height="20" fill="#888"/>
+
+          <!-- PLATE (side view): horizontal, CENTRED above the wrist at x = 250 -->
+          <rect x="195" y="120" width="110" height="8" fill="#dcc093" stroke="#a48246" stroke-width="1.4" rx="2"/>
+
+          <!-- ball resting on top of the plate -->
+          <circle cx="280" cy="113" r="6" fill="#c83040" stroke="#761018" stroke-width="1"/>
+
+          <!-- WORLD frame {W} at the base -->
+          <g>
+            <line x1="95" y1="260" x2="160" y2="260" stroke="#003262" stroke-width="2.4" marker-end="url(#axW)"/>
+            <text x="166" y="264" fill="#003262" font-size="13" font-family="Fraunces" font-style="italic">x̂<tspan dy="3" font-size="10">W</tspan></text>
+            <line x1="95" y1="260" x2="95" y2="200" stroke="#003262" stroke-width="2.4" marker-end="url(#axW)"/>
+            <text x="100" y="195" fill="#003262" font-size="13" font-family="Fraunces" font-style="italic">ẑ<tspan dy="3" font-size="10">W</tspan></text>
+            <circle cx="95" cy="260" r="3" fill="#003262"/>
+            <text x="78" y="278" fill="#003262" font-size="12" font-family="Fraunces" font-style="italic">$\{W\}$</text>
+          </g>
+
+          <!-- PLATE frame {P} at the geometric centre of the plate -->
+          <g>
+            <line x1="250" y1="124" x2="320" y2="124" stroke="#c4820e" stroke-width="2.4" marker-end="url(#axP)"/>
+            <text x="326" y="127" fill="#c4820e" font-size="13" font-family="Fraunces" font-style="italic">x̂<tspan dy="3" font-size="10">P</tspan></text>
+            <line x1="250" y1="124" x2="250" y2="78" stroke="#c4820e" stroke-width="2.4" marker-end="url(#axP)"/>
+            <text x="255" y="75" fill="#c4820e" font-size="13" font-family="Fraunces" font-style="italic">ẑ<tspan dy="3" font-size="10">P</tspan></text>
+            <circle cx="250" cy="124" r="3" fill="#c4820e"/>
+            <text x="218" y="115" fill="#c4820e" font-size="12" font-family="Fraunces" font-style="italic">$\{P\}$</text>
+          </g>
+        </svg>
+        <figcaption><span class="fig-num">Figure 1.</span> The two reference frames in context. World frame $\{W\}$ at the UR7e base; plate frame $\{P\}$ at the geometric centre of the plate. The plate frame rotates with the wrist.</figcaption>
+      </figure>
+    </div>
+
+    <p>
+      The relative orientation of the two frames depends on the joint configuration
+      $q \in \mathbb{R}^6$ and is encoded in a rotation matrix
+      $R_{WP}(q) \in SO(3)$, with components of a vector $v$ transforming as
+      $v^{W} = R_{WP}(q)\, v^{P}$. The inverse mapping is
+      $R_{PW}(q) = R_{WP}(q)^{\top}$.
+    </p>
+    <p>
+      Writing a vector $\hat v$ with a trailing-superscript $\hat v^{F}$ indicates
+      that its components are given in frame $F$. By construction $\hat e_x =
+      (1, 0, 0)^{\top}$ in $\{P\}$, but its components in $\{W\}$ are the first
+      column of $R_{WP}(q)$:
+    </p>
+    <div class="math-block">
+      $$\hat x_P^{\,W}(q) \;=\; R_{WP}(q)\, \hat e_x, \qquad
+        \hat y_P^{\,W}(q) \;=\; R_{WP}(q)\, \hat e_y.$$
+    </div>
+    <p>
+      These two columns are the world-frame coordinates of the plate's local axes;
+      they feed the wiring stage of the controller.
+    </p>
+
+    <p>
+      Rotation 3-vectors and the rotational manipulator Jacobian $J_r(q)$ are
+      always expressed in the world frame $\{W\}$, so the trailing-superscript
+      $^{W}$ is dropped from $\theta_{\text{tar}}$, $\Delta\theta$, and $J_r$ and
+      retained only where the choice of frame is the point being made, as in the
+      wiring stage, where the change of basis $R_{WP}$ is applied.
+    </p>
+
+    <h3 class="section-h"><span class="section-num">§ 2</span>Ball state and reference trajectory</h3>
+    <p>
+      The ball is treated as a point in the plate plane, and its planar state is the
+      4-vector
+    </p>
+    <div class="math-block">
+      $$X \;=\; \begin{pmatrix} x & y & \dot x & \dot y \end{pmatrix}^{\!\top} \;\in\; \mathbb{R}^4,$$
+    </div>
+    <p>
+      with $(x, y)$ in metres in $\{P\}$ and $(\dot x, \dot y)$ in metres per second.
+      The vision subsystem produces $X$ from the camera image (see the
+      <a href="vision.html">vision page</a>); the controller consumes it.
+    </p>
+    <p>
+      A reference trajectory $r(t) = (x_r(t), y_r(t), \dot x_r(t), \dot y_r(t))$ is supplied
+      from a small browser-based path designer. The reference is sampled at the controller
+      rate and used to define the position and velocity tracking errors:
+    </p>
+    <div class="math-block">
+      $$e_p(t) = \begin{pmatrix} x - x_r \\ y - y_r \end{pmatrix}, \qquad e_v(t) = \begin{pmatrix} \dot x - \dot x_r \\ \dot y - \dot y_r \end{pmatrix}.$$
+    </div>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 360 360" style="margin: 0 auto;">
+        <rect x="40" y="40" width="280" height="280" fill="#fef9ed" stroke="#a48246" stroke-width="2" rx="6"/>
+        <rect x="50" y="50" width="20" height="20" fill="#0a1929"/>
+        <rect x="290" y="50" width="20" height="20" fill="#0a1929"/>
+        <rect x="50" y="290" width="20" height="20" fill="#0a1929"/>
+        <rect x="290" y="290" width="20" height="20" fill="#0a1929"/>
+        <line x1="180" y1="180" x2="280" y2="180" stroke="#003262" stroke-width="3" marker-end="url(#xax)"/>
+        <text x="290" y="184" fill="#003262" font-size="14" font-style="italic">$\hat x_P$</text>
+        <line x1="180" y1="180" x2="180" y2="80" stroke="#003262" stroke-width="3" marker-end="url(#xax)"/>
+        <text x="186" y="74" fill="#003262" font-size="14" font-style="italic">$\hat y_P$</text>
+        <circle cx="180" cy="180" r="6" fill="#003262"/>
+        <circle cx="180" cy="180" r="2.5" fill="#fdb515"/>
+        <text x="166" y="200" fill="#003262" font-size="11" font-style="italic">{P}</text>
+        <g stroke="#288c5a" stroke-width="2" fill="none">
+          <circle cx="240" cy="105" r="10"/>
+          <line x1="226" y1="105" x2="254" y2="105"/>
+          <line x1="240" y1="91" x2="240" y2="119"/>
+        </g>
+        <text x="252" y="92" fill="#288c5a" font-size="10" font-style="italic">target $r(t)$</text>
+        <circle cx="120" cy="240" r="11" fill="#c83040" stroke="#761018" stroke-width="1.5"/>
+        <text x="80" y="270" fill="#761018" font-size="10" font-style="italic">ball $X$</text>
+        <line x1="120" y1="240" x2="240" y2="105" stroke="#b41e28" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#redx)"/>
+        <text x="178" y="180" fill="#b41e28" font-size="11" font-style="italic" font-weight="600">$-e_p$</text>
+        <defs>
+          <marker id="xax" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+          <marker id="redx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#b41e28"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption><span class="fig-num">Figure 1.</span> Plate frame $\{P\}$ as seen from the overhead camera. Origin at the plate centre, $\hat x_P$ to the right, $\hat y_P$ up. The four corners carry the ArUco fiducials. The arrow from ball to target is the negative position error $-e_p$.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 3</span>Hardware</h3>
+    <p>
+      Five hardware components define the physical setup: the arm, the plate, the ball,
+      the overhead camera, and the fiducial markers used to localise the plate in the
+      camera image.
+    </p>
+
+    <div class="hardware-grid">
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <linearGradient id="urLinkA" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#cfcfcf"/>
+                <stop offset="100%" stop-color="#a4a4a4"/>
+              </linearGradient>
+            </defs>
+            <line x1="20" y1="162" x2="220" y2="162" stroke="#bbb" stroke-width="1.3" stroke-dasharray="5 4"/>
+            <ellipse cx="65" cy="160" rx="28" ry="5" fill="#666"/>
+            <rect x="44" y="130" width="42" height="30" rx="5" fill="#dadada" stroke="#888" stroke-width="1.2"/>
+            <ellipse cx="65" cy="130" rx="21" ry="5" fill="#bbbbbb" stroke="#888" stroke-width="1.2"/>
+            <circle cx="65" cy="115" r="11" fill="#003262" stroke="#001a40" stroke-width="1.2"/>
+            <circle cx="65" cy="115" r="4" fill="#fdb515"/>
+            <rect x="60" y="65" width="10" height="50" fill="url(#urLinkA)" stroke="#777" stroke-width="0.9"/>
+            <circle cx="65" cy="65" r="10" fill="#003262" stroke="#001a40" stroke-width="1.2"/>
+            <rect x="65" y="60" width="110" height="10" fill="url(#urLinkA)" stroke="#777" stroke-width="0.9"/>
+            <circle cx="155" cy="65" r="8" fill="#4a7fa8" stroke="#003262" stroke-width="1"/>
+            <circle cx="170" cy="65" r="7" fill="#6643a0" stroke="#3d1d72" stroke-width="1"/>
+            <rect x="166" y="45" width="8" height="15" fill="#888"/>
+            <rect x="125" y="38" width="90" height="7" fill="#dcc093" stroke="#a48246" stroke-width="1.2" rx="2"/>
+          </svg>
+        </div>
+        <h4>Universal Robots UR7e</h4>
+        <div class="hw-spec">6-DOF &middot; 850 mm reach &middot; 7 kg payload</div>
+        <p>
+          Six-axis collaborative arm. The joint configuration
+          $q = (q_1, q_2, q_3, q_4, q_5, q_6) \in \mathbb{R}^6$ uses the canonical UR
+          ordering: shoulder pan, shoulder lift, elbow, wrist 1, wrist 2, wrist 3.
+        </p>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <!-- Top-down view of the plate with its four ArUco corners and side-length annotation. -->
+            <rect x="40" y="30" width="160" height="120" fill="#fef9ed" stroke="#a48246" stroke-width="2" rx="4"/>
+            <!-- 4 ArUco markers at the corners -->
+            <g fill="#0a1929">
+              <rect x="50"  y="40"  width="22" height="22"/>
+              <rect x="168" y="40"  width="22" height="22"/>
+              <rect x="50"  y="118" width="22" height="22"/>
+              <rect x="168" y="118" width="22" height="22"/>
+            </g>
+            <!-- inner cells of the corner markers (just visual hints) -->
+            <g fill="#fef9ed">
+              <rect x="56"  y="46"  width="4" height="4"/>
+              <rect x="64"  y="50"  width="4" height="4"/>
+              <rect x="174" y="46"  width="4" height="4"/>
+              <rect x="180" y="54"  width="4" height="4"/>
+              <rect x="56"  y="128" width="4" height="4"/>
+              <rect x="62"  y="124" width="4" height="4"/>
+              <rect x="174" y="124" width="4" height="4"/>
+              <rect x="180" y="132" width="4" height="4"/>
+            </g>
+            <!-- centre dot + label -->
+            <circle cx="120" cy="90" r="3.5" fill="#003262"/>
+            <text x="125" y="94" fill="#003262" font-family="Fraunces" font-size="11" font-style="italic">$\{P\}$</text>
+            <!-- side-length annotation L -->
+            <line x1="40" y1="160" x2="200" y2="160" stroke="#888" stroke-width="1"/>
+            <line x1="40" y1="156" x2="40" y2="164" stroke="#888" stroke-width="1"/>
+            <line x1="200" y1="156" x2="200" y2="164" stroke="#888" stroke-width="1"/>
+            <text x="120" y="173" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">$L = 45.7$ cm</text>
+          </svg>
+        </div>
+        <h4>Acrylic plate</h4>
+        <div class="hw-spec">square &middot; side $L = 45.7$ cm</div>
+        <p>
+          A flat acrylic sheet bolted to the wrist tool flange through a custom adapter
+          that fixes the plate centre at a known offset from the flange. The plate size
+          sets the reachable workspace within which the ball can be balanced.
+        </p>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <radialGradient id="ballGrad" cx="40%" cy="35%" r="60%">
+                <stop offset="0%"  stop-color="#fcd9c0"/>
+                <stop offset="55%" stop-color="#e26b4a"/>
+                <stop offset="100%" stop-color="#7a1f0a"/>
+              </radialGradient>
+            </defs>
+            <!-- table surface for the ball to rest on -->
+            <ellipse cx="120" cy="155" rx="80" ry="6" fill="#bbb"/>
+            <!-- contact shadow -->
+            <ellipse cx="120" cy="150" rx="36" ry="5" fill="rgba(0,0,0,0.18)"/>
+            <!-- ball -->
+            <circle cx="120" cy="100" r="50" fill="url(#ballGrad)"/>
+            <!-- specular highlight -->
+            <ellipse cx="100" cy="82" rx="14" ry="9" fill="rgba(255,255,255,0.55)" transform="rotate(-25 100 82)"/>
+            <!-- diameter dimension -->
+            <line x1="60"  y1="100" x2="180" y2="100" stroke="#666" stroke-width="0.8" stroke-dasharray="3 2"/>
+            <line x1="70"  y1="40"  x2="70"  y2="100" stroke="#666" stroke-width="0.8" stroke-dasharray="3 2"/>
+            <line x1="170" y1="40"  x2="170" y2="100" stroke="#666" stroke-width="0.8" stroke-dasharray="3 2"/>
+            <line x1="70"  y1="40"  x2="170" y2="40"  stroke="#666" stroke-width="1"/>
+            <line x1="70"  y1="36"  x2="70"  y2="44"  stroke="#666" stroke-width="1"/>
+            <line x1="170" y1="36"  x2="170" y2="44"  stroke="#666" stroke-width="1"/>
+            <text x="120" y="30" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">$2\rho = 40$ mm</text>
+          </svg>
+        </div>
+        <h4>ITTF ping-pong ball</h4>
+        <div class="hw-spec">diameter $2\rho = 40$ mm &middot; mass $m \approx 2.7$ g</div>
+        <p>
+          Standard regulation ball. The diameter sets the contact geometry for the
+          rolling-without-slipping dynamics derived on the
+          <a href="physics.html">physics page</a>; the mass enters the rolling equation
+          only as a common factor that cancels.
+        </p>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <!-- Frontal view of the RealSense D435i: rectangular module with two IR lenses, the colour lens, and the RGB LED. -->
+            <rect x="30" y="60" width="180" height="60" rx="6" fill="#2a2a2e" stroke="#0a0a0e" stroke-width="1.4"/>
+            <rect x="36" y="66" width="168" height="48" rx="3" fill="#1d1d20"/>
+            <!-- left IR -->
+            <circle cx="62" cy="90" r="11" fill="#1a1a1c" stroke="#3a3a3e" stroke-width="1.2"/>
+            <circle cx="62" cy="90" r="6" fill="#0c1f3a"/>
+            <!-- IR emitter -->
+            <circle cx="98" cy="90" r="6" fill="#1a1a1c" stroke="#3a3a3e" stroke-width="1"/>
+            <circle cx="98" cy="90" r="2.5" fill="#5a2a2a"/>
+            <!-- RGB lens (main colour camera) -->
+            <circle cx="140" cy="90" r="11" fill="#1a1a1c" stroke="#3a3a3e" stroke-width="1.2"/>
+            <circle cx="140" cy="90" r="6" fill="#0c1f3a"/>
+            <circle cx="138" cy="88" r="1.8" fill="rgba(255,255,255,0.45)"/>
+            <!-- right IR -->
+            <circle cx="178" cy="90" r="11" fill="#1a1a1c" stroke="#3a3a3e" stroke-width="1.2"/>
+            <circle cx="178" cy="90" r="6" fill="#0c1f3a"/>
+            <!-- mounting bracket on top -->
+            <rect x="100" y="48" width="40" height="14" rx="2" fill="#444"/>
+            <line x1="120" y1="36" x2="120" y2="48" stroke="#666" stroke-width="2"/>
+            <!-- label -->
+            <text x="120" y="146" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">RealSense D435i</text>
+          </svg>
+        </div>
+        <h4>Intel RealSense D435i</h4>
+        <div class="hw-spec">overhead &middot; 60 fps colour stream</div>
+        <p>
+          Mounted overhead with optical axis approximately perpendicular to the plate.
+          Only the colour stream is consumed by the perception pipeline; the depth
+          channel is unused. The frame rate sets the upper bound on the perception
+          update interval.
+        </p>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <!-- An actual 6×6 ArUco-style fiducial: bordered black with a quiet-zone, then an inner 4×4 binary grid. -->
+            <rect x="60" y="20" width="120" height="120" fill="#0a1929"/>
+            <!-- inner 4x4 grid of cells, each 20x20 starting at (80, 40). Pattern chosen to look ArUco-like. -->
+            <g fill="#ffffff">
+              <rect x="80"  y="40"  width="20" height="20"/>
+              <rect x="120" y="40"  width="20" height="20"/>
+              <rect x="160" y="40"  width="20" height="20"/>
+              <rect x="100" y="60"  width="20" height="20"/>
+              <rect x="140" y="60"  width="20" height="20"/>
+              <rect x="80"  y="80"  width="20" height="20"/>
+              <rect x="120" y="80"  width="20" height="20"/>
+              <rect x="100" y="100" width="20" height="20"/>
+              <rect x="160" y="100" width="20" height="20"/>
+            </g>
+            <!-- subtle outline -->
+            <rect x="60" y="20" width="120" height="120" fill="none" stroke="#3a3a3e" stroke-width="0.8"/>
+            <text x="120" y="160" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">DICT_4×4_50</text>
+          </svg>
+        </div>
+        <h4>ArUco fiducial markers</h4>
+        <div class="hw-spec">four corners &middot; known $\{P\}$-frame coordinates</div>
+        <p>
+          Printed at the plate corners with known coordinates in $\{P\}$. The perception
+          subsystem detects all four in the camera image and uses them to fit a
+          homography from image pixels to plate-frame metres.
+        </p>
+      </div>
+
+    </div>
+
+    <h3 class="section-h"><span class="section-num">§ 4</span>Joint locking</h3>
+    <p>
+      During operation the upper-arm joints $q_1, q_2, q_3$ are held at their home values
+      $q_{1,\text{home}}, q_{2,\text{home}}, q_{3,\text{home}}$. Only the three wrist joints
+      $q_4, q_5, q_6$ articulate the plate. Two consequences follow.
+    </p>
+    <p>
+      First, the position of the plate centre is determined entirely by the locked joints
+      and is constant during operation. The controller's job is to regulate the plate
+      <em>orientation</em> alone; the control problem reduces to a three-dimensional
+      rotation tracking problem.
+    </p>
+    <p>
+      Second, the inverse-kinematics step (described on the
+      <a href="control.html">control page</a>) reduces from a $3 \times 6$ underdetermined
+      system to an effectively square $3 \times 3$ system on the wrist columns of the
+      rotational Jacobian. This makes the IK well-conditioned at the home configuration
+      and avoids the need for regularisation.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 220" style="margin: 0 auto;">
+        <g font-family="JetBrains Mono" font-size="11">
+          <g><rect x="20" y="80" width="58" height="60" rx="8" fill="#d8d8d8" stroke="#888"/>
+            <text x="49" y="105" text-anchor="middle" fill="#666" font-weight="600">$q_1$</text>
+            <text x="49" y="124" text-anchor="middle" fill="#666" font-size="9">shoulder</text>
+            <text x="49" y="160" text-anchor="middle" fill="#888" font-size="9">LOCKED</text></g>
+          <g><rect x="90" y="80" width="58" height="60" rx="8" fill="#d8d8d8" stroke="#888"/>
+            <text x="119" y="105" text-anchor="middle" fill="#666" font-weight="600">$q_2$</text>
+            <text x="119" y="124" text-anchor="middle" fill="#666" font-size="9">lift</text>
+            <text x="119" y="160" text-anchor="middle" fill="#888" font-size="9">LOCKED</text></g>
+          <g><rect x="160" y="80" width="58" height="60" rx="8" fill="#d8d8d8" stroke="#888"/>
+            <text x="189" y="105" text-anchor="middle" fill="#666" font-weight="600">$q_3$</text>
+            <text x="189" y="124" text-anchor="middle" fill="#666" font-size="9">elbow</text>
+            <text x="189" y="160" text-anchor="middle" fill="#888" font-size="9">LOCKED</text></g>
+          <g><rect x="240" y="80" width="58" height="60" rx="8" fill="#fef3da" stroke="#c4820e" stroke-width="1.5"/>
+            <text x="269" y="105" text-anchor="middle" fill="#8d5e0a" font-weight="600">$q_4$</text>
+            <text x="269" y="124" text-anchor="middle" fill="#8d5e0a" font-size="9">wrist 1</text>
+            <text x="269" y="160" text-anchor="middle" fill="#c4820e" font-size="9">FREE</text></g>
+          <g><rect x="310" y="80" width="58" height="60" rx="8" fill="#fef3da" stroke="#c4820e" stroke-width="1.5"/>
+            <text x="339" y="105" text-anchor="middle" fill="#8d5e0a" font-weight="600">$q_5$</text>
+            <text x="339" y="124" text-anchor="middle" fill="#8d5e0a" font-size="9">wrist 2</text>
+            <text x="339" y="160" text-anchor="middle" fill="#c4820e" font-size="9">FREE</text></g>
+          <g><rect x="380" y="80" width="58" height="60" rx="8" fill="#fef3da" stroke="#c4820e" stroke-width="1.5"/>
+            <text x="409" y="105" text-anchor="middle" fill="#8d5e0a" font-weight="600">$q_6$</text>
+            <text x="409" y="124" text-anchor="middle" fill="#8d5e0a" font-size="9">wrist 3</text>
+            <text x="409" y="160" text-anchor="middle" fill="#c4820e" font-size="9">FREE</text></g>
+        </g>
+        <text x="119" y="40" text-anchor="middle" fill="#888" font-size="11" font-family="Fraunces" font-style="italic">held at home</text>
+        <text x="339" y="40" text-anchor="middle" fill="#c4820e" font-size="11" font-family="Fraunces" font-style="italic" font-weight="600">articulate the plate</text>
+        <line x1="20" y1="50" x2="218" y2="50" stroke="#888" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="240" y1="50" x2="438" y2="50" stroke="#c4820e" stroke-width="1.5"/>
+      </svg>
+      <figcaption><span class="fig-num">Figure 2.</span> Joint locking. The three upper-arm joints are held at home; only the three wrist joints contribute to plate orientation.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 5</span>Notation summary</h3>
+    <dl class="notation-list">
+      <dt>$\{W\}$, $\{P\}$</dt><dd>world frame (UR base) and plate frame (plate centre).</dd>
+      <dt>$v^{F}$</dt><dd>vector $v$ with its components written in frame $F \in \{W, P\}$.</dd>
+      <dt>$R_{WP}(q) \in SO(3)$</dt><dd>rotation matrix that takes components of a vector in $\{P\}$ to components in $\{W\}$: $v^{W} = R_{WP}(q)\, v^{P}$.</dd>
+      <dt>$R_{PW}(q) = R_{WP}(q)^{\top}$</dt><dd>inverse mapping: $v^{P} = R_{PW}(q)\, v^{W}$.</dd>
+      <dt>$\hat x_P^{\,W}(q), \hat y_P^{\,W}(q)$</dt><dd>plate's local axes expressed in $\{W\}$; first two columns of $R_{WP}(q)$.</dd>
+      <dt>$X = (x, y, \dot x, \dot y)^\top$</dt><dd>ball state in $\{P\}$.</dd>
+      <dt>$r(t) = (x_r, y_r, \dot x_r, \dot y_r)$</dt><dd>reference trajectory in $\{P\}$.</dd>
+      <dt>$e_p, e_v$</dt><dd>position and velocity tracking errors in $\{P\}$.</dd>
+      <dt>$q \in \mathbb{R}^6$</dt><dd>UR joint configuration; $q_{1..3}$ locked at home, $q_{4..6}$ free.</dd>
+      <dt>$L = 0.457$ m</dt><dd>plate side length.</dd>
+      <dt>$\rho = 0.020$ m, $m \approx 0.0027$ kg</dt><dd>ball radius and mass.</dd>
+    </dl>
+
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 6</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F. J., Marín-Jiménez, M. J.</span> (2014).
+          <span class="bib-title">Automatic generation and detection of highly reliable fiducial markers under occlusion</span>.
+          <span class="bib-venue">Pattern Recognition, 47(6), 2280–2292</span>.
+          <a class="bib-link" href="https://doi.org/10.1016/j.patcog.2014.01.005" target="_blank" rel="noopener">doi.org/10.1016/j.patcog.2014.01.005</a>
+        </li>
+        <li>
+          <span class="bib-authors">Romero-Ramirez, F. J., Muñoz-Salinas, R., Medina-Carnicer, R.</span> (2018).
+          <span class="bib-title">Speeded up detection of squared fiducial markers</span>.
+          <span class="bib-venue">Image and Vision Computing, 76, 38–47</span>.
+          <a class="bib-link" href="https://doi.org/10.1016/j.imavis.2018.05.004" target="_blank" rel="noopener">doi.org/10.1016/j.imavis.2018.05.004</a>
+        </li>
+        <li>
+          <span class="bib-authors">Zhang, Z.</span> (2000).
+          <span class="bib-title">A flexible new technique for camera calibration</span>.
+          <span class="bib-venue">IEEE Transactions on Pattern Analysis and Machine Intelligence, 22(11), 1330–1334</span>.
+          <a class="bib-link" href="https://doi.org/10.1109/34.888718" target="_blank" rel="noopener">doi.org/10.1109/34.888718</a>
+        </li>
+        <li>
+          <span class="bib-authors">Keselman, L., Woodfill, J. I., Grunnet-Jepsen, A., Bhowmik, A.</span> (2017).
+          <span class="bib-title">Intel RealSense stereoscopic depth cameras</span>.
+          <span class="bib-venue">CVPR Workshops</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1705.05548" target="_blank" rel="noopener">arxiv.org/abs/1705.05548</a>
+        </li>
+        <li>
+          <span class="bib-authors">Murray, R. M., Li, Z., Sastry, S. S.</span> (1994).
+          <span class="bib-title">A Mathematical Introduction to Robotic Manipulation</span>.
+          <span class="bib-venue">CRC Press</span>.
+          <a class="bib-link" href="https://www.cds.caltech.edu/~murray/mlswiki" target="_blank" rel="noopener">cds.caltech.edu/~murray/mlswiki</a>
+        </li>
+        <li>
+          <span class="bib-authors">Universal Robots A/S</span> (2024).
+          <span class="bib-title">PolyScope 5 User Manual — UR7e</span>.
+          <span class="bib-venue">Universal Robots A/S, doc. 733-466-00</span>.
+          <a class="bib-link" href="https://www.universal-robots.com/manuals/EN/PDF/SW5_24/user-manual-UR7e-PDF_online/733-466-00_UR7e_User_Manual_en_Global.pdf" target="_blank" rel="noopener">universal-robots.com/manuals</a>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

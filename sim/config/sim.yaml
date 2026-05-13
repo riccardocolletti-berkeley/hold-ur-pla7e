@@ -1,0 +1,54 @@
+# ============================================================
+# Ball-on-Plate Simulation Configuration
+# ============================================================
+# All values are SI: meters, kilograms, seconds, radians.
+# The plate / ball / physics specification is shared with the real-robot
+# stack and lives in `ball_on_plate/config/hardware.yaml`.
+
+# --- Robot joint trajectory (waypoints + per-segment durations) ---
+trajectory:
+  home:        [0.0, -1.57, 1.57, -1.57, 1.57, 0.0]
+  dest_offset: [1.0,  0.15, -0.15, 0.0, 0.0, 0.0]
+  mid_offset:  [0.5,  0.08, -0.08, 0.0, 0.0, 0.0]
+  durations:   [2.0, 5.0, 5.0, 3.0, 2.5, 1.5]
+
+# --- Joint-level gains (shared by every controller) ---
+gains:
+  Kp_joint: [500, 500, 500, 200, 200, 200]
+  Kd_joint: [ 50,  50,  50,  20,  20,  20]
+
+# --- Ball-level PID gains ---
+pid:
+  Kp_ball:      1.2299
+  Ki_ball:      0.9455
+  Kd_ball:      1.2745
+  Kff_ball:     0.1358   # feed-forward on target acceleration
+  alpha:        0.2754   # low-pass weight on the actuator filter
+  max_tilt:     0.1      # max joint correction [rad]
+  windup_limit: 0.05     # integral anti-windup [m·s]
+
+# --- Ball-level MPC params (used when --controller mpc) ---
+# Quadratic stage cost: q_pos·(x-r)² + q_vel·(v-v_r)² + r_u·u²
+# Terminal cost     : qf_pos·(x_N-r_N)² + qf_vel·(v_N-v_r_N)²
+# `max_tilt` from the pid block above is reused as the MPC output clamp,
+# and `alpha` / `Kp_joint` / `Kd_joint` still drive the same downstream
+# actuator stack (Jacobian projection, low-pass, joint PD, gravity comp).
+mpc:
+  horizon:  25            # prediction steps (~0.42 s at dt=1/60)
+  dt:       0.01667       # planning timestep [s] (1/60)
+  q_pos:    150.0         # position-tracking weight
+  q_vel:    15.0          # velocity-tracking weight (damping)
+  r_u:      1.0           # control-effort weight (must be > 0)
+  qf_pos:   750.0         # terminal position weight (large: emulates infinite-horizon LQR)
+  qf_vel:   75.0          # terminal velocity weight
+
+# --- Ball reference trajectory ---
+ball_trajectory:
+  shape:       circle    # stationary | center | circle | figure8 | drawn
+  radius:      0.075     # target offset from plate centre [m]
+  period:      10.0      # one full loop [s]
+  settle_time: 3.0       # smooth-approach blend window [s]
+  # file: path/to/drawn.json   # only used when shape = drawn
+
+# --- Rendering ---
+render_fps: 60

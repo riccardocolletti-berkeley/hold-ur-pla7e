@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ROS · Hold UR Pla7e</title>
+  <meta name="description" content="ROS 2 architecture for the ball-on-plate testbed: node graph, topics, custom BallState message, and the launch composition for the real-arm stack." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Software architecture</p>
+      <h1>ROS 2 architecture</h1>
+      <p class="lead">
+        The real-robot stack is a Robot Operating System 2 graph: a perception
+        node that turns camera frames into a ball state, a controller node that
+        turns the ball state into joint commands, and the Universal Robots
+        firmware that closes the inner torque loop. Two controller variants
+        share the same topic interface, so the PID and the MPC are
+        interchangeable without touching the rest of the graph.
+      </p>
+    </div>
+  </header>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+
+    <h3 id="sec-arch" class="section-h"><span class="section-num">§ 1</span>Architecture overview</h3>
+    <p>
+      The real-robot stack is split into three layers. At the bottom, the
+      Universal Robots firmware closes a high-rate joint-space torque
+      loop and exposes the arm through the standard <code>ros2_control</code>
+      interfaces; this layer is treated as a black box. Above it sits a
+      controller node, either the PID of the
+      <a href="control.html">control page</a> or the MPC of the
+      <a href="mpc.html">MPC page</a>, which reads the latest ball state and
+      joint positions at every tick and writes back a joint command. Above
+      the controller, a vision node runs the perception pipeline of the
+      <a href="vision.html">vision page</a> and publishes the ball state on a
+      topic that any controller can read.
+    </p>
+    <p>
+      A single custom message, <code>BallState</code>, carries everything the
+      controller needs from perception in one timestamped snapshot. The UR
+      driver's <code>robot_state_publisher</code> maintains the transform
+      tree from the joint states and the robot description, so the
+      controller queries the world-to-plate rotation at every tick instead
+      of recomputing it from forward kinematics.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 880 360" style="margin: 0 auto; max-width: 100%; width: 100%;">
+        <defs>
+          <linearGradient id="hwLap" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2a2f36"/>
+            <stop offset="100%" stop-color="#1a1d22"/>
+          </linearGradient>
+          <linearGradient id="hwScreen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#eaf3fb"/>
+            <stop offset="100%" stop-color="#c4dceb"/>
+          </linearGradient>
+          <linearGradient id="hwBox" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#dadada"/>
+            <stop offset="100%" stop-color="#a4a4a4"/>
+          </linearGradient>
+          <linearGradient id="hwArm" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#cfcfcf"/>
+            <stop offset="100%" stop-color="#a4a4a4"/>
+          </linearGradient>
+          <marker id="ethArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+        </defs>
+
+        <!-- ===== ROS 2 domain banner (dashed gold rectangle around workstation + UR Control Box) ===== -->
+        <rect x="20" y="20" width="610" height="310" rx="14"
+              fill="none" stroke="#c4820e" stroke-width="1.6" stroke-dasharray="7 5" opacity="0.7"/>
+        <text x="40" y="44" font-family="Fraunces" font-style="italic" font-size="13" fill="#c4820e" font-weight="700">ROS 2 domain</text>
+
+        <!-- ===== USB camera (top-left) ===== -->
+        <g>
+          <rect x="60" y="70" width="80" height="60" rx="6" fill="url(#hwLap)"/>
+          <circle cx="100" cy="100" r="16" fill="#1a1d22" stroke="#888" stroke-width="2"/>
+          <circle cx="100" cy="100" r="10" fill="#0a1929" stroke="#444" stroke-width="1"/>
+          <circle cx="103" cy="97" r="3" fill="#3b7ea1" opacity="0.8"/>
+          <rect x="84" y="62" width="32" height="8" rx="2" fill="#1a1d22"/>
+          <text x="100" y="148" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#444">USB camera</text>
+        </g>
+
+        <!-- USB cable: camera → workstation -->
+        <path d="M 100 155 C 100 175 120 185 145 200" stroke="#888" stroke-width="1.8" fill="none" stroke-dasharray="3 2"/>
+        <text x="118" y="180" font-family="Fraunces" font-style="italic" font-size="9.5" fill="#888">USB</text>
+
+        <!-- ===== Workstation laptop (left) ===== -->
+        <g>
+          <!-- screen -->
+          <rect x="60" y="180" width="220" height="120" rx="6" fill="url(#hwLap)" stroke="#111" stroke-width="1.5"/>
+          <rect x="72" y="192" width="196" height="96" rx="3" fill="url(#hwScreen)"/>
+          <!-- screen content: stack of pill labels -->
+          <g font-family="Fraunces" font-size="10" font-weight="600" fill="#003262">
+            <rect x="82" y="200" width="100" height="18" rx="9" fill="#fff" stroke="#003262" stroke-width="1"/>
+            <text x="132" y="213" text-anchor="middle">ball_tracker</text>
+            <rect x="82" y="224" width="176" height="18" rx="9" fill="#fff" stroke="#003262" stroke-width="1"/>
+            <text x="170" y="237" text-anchor="middle">ball_balance_controller</text>
+            <rect x="82" y="248" width="120" height="18" rx="9" fill="#fff" stroke="#003262" stroke-width="1"/>
+            <text x="142" y="261" text-anchor="middle">ball_balance_mpc</text>
+            <rect x="82" y="272" width="50" height="14" rx="7" fill="#fef3da" stroke="#c4820e" stroke-width="1"/>
+            <text x="107" y="283" text-anchor="middle" font-size="9" fill="#8d5e0a">RViz</text>
+            <rect x="138" y="272" width="120" height="14" rx="7" fill="#f3f3f1" stroke="#888" stroke-width="0.8"/>
+            <text x="198" y="283" text-anchor="middle" font-size="9" fill="#555">Ubuntu · ROS 2 humble</text>
+          </g>
+          <!-- laptop base -->
+          <path d="M 50 300 L 290 300 L 300 312 L 40 312 Z" fill="#1a1d22" stroke="#111" stroke-width="1.5"/>
+          <rect x="155" y="298" width="30" height="3" rx="1" fill="#444"/>
+          <text x="170" y="328" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#444">workstation</text>
+        </g>
+
+        <!-- ===== Network cable: workstation → UR Control Box ===== -->
+        <line x1="280" y1="225" x2="450" y2="225" stroke="#003262" stroke-width="2.4" marker-end="url(#ethArr)"/>
+        <text x="365" y="217" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262" font-weight="700">network</text>
+        <text x="365" y="242" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="9.5" fill="#003262">/ball_state · /joint_states · /joint_traj</text>
+
+        <!-- ===== UR Control Box ===== -->
+        <g>
+          <rect x="450" y="170" width="170" height="130" rx="8" fill="url(#hwBox)" stroke="#666" stroke-width="1.5"/>
+          <!-- top status LED strip -->
+          <rect x="465" y="180" width="140" height="6" rx="3" fill="#003262"/>
+          <!-- front display panel -->
+          <rect x="475" y="200" width="120" height="50" rx="4" fill="#0a1929" stroke="#444" stroke-width="1.2"/>
+          <text x="535" y="222" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#5dd"  font-weight="600">PolyScope</text>
+          <text x="535" y="240" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="9.5" fill="#9bf">ros2_control · scaled JTC</text>
+          <!-- ports row -->
+          <g fill="#666">
+            <rect x="475" y="262" width="14" height="10" rx="1"/>
+            <rect x="495" y="262" width="14" height="10" rx="1"/>
+            <rect x="515" y="262" width="14" height="10" rx="1"/>
+            <rect x="535" y="262" width="32" height="10" rx="1"/>
+          </g>
+          <text x="535" y="290" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#444">UR Control Box</text>
+        </g>
+
+        <!-- Industrial cable: UR Control Box → arm -->
+        <path d="M 620 230 C 660 230 670 200 690 180" stroke="#444" stroke-width="3.2" fill="none"/>
+        <path d="M 620 230 C 660 230 670 200 690 180" stroke="#888" stroke-width="1.4" fill="none" stroke-dasharray="2 3"/>
+
+        <!-- ===== UR7e arm (right) ===== -->
+        <g transform="translate(680 60)">
+          <!-- base on floor -->
+          <ellipse cx="60" cy="218" rx="40" ry="6" fill="#666"/>
+          <rect x="32" y="180" width="56" height="40" rx="5" fill="url(#hwArm)" stroke="#777" stroke-width="1"/>
+          <!-- shoulder -->
+          <circle cx="60" cy="160" r="14" fill="#003262" stroke="#001a40" stroke-width="1.4"/>
+          <circle cx="60" cy="160" r="5" fill="#fdb515"/>
+          <!-- upper arm -->
+          <rect x="54" y="90" width="12" height="72" fill="url(#hwArm)" stroke="#777" stroke-width="0.8"/>
+          <!-- elbow -->
+          <circle cx="60" cy="90" r="12" fill="#003262" stroke="#001a40" stroke-width="1.4"/>
+          <!-- forearm -->
+          <rect x="60" y="84" width="100" height="12" fill="url(#hwArm)" stroke="#777" stroke-width="0.8"/>
+          <!-- wrist cluster -->
+          <circle cx="150" cy="90" r="10" fill="#4a7fa8" stroke="#003262" stroke-width="1"/>
+          <circle cx="166" cy="90" r="8"  fill="#6643a0" stroke="#3d1d72" stroke-width="1"/>
+          <!-- adapter and plate -->
+          <rect x="160" y="64" width="8" height="20" fill="#666"/>
+          <rect x="116" y="58" width="100" height="6" fill="#dcc093" stroke="#a48246" stroke-width="1.2" rx="1"/>
+          <!-- ball on plate -->
+          <circle cx="180" cy="52" r="5" fill="#c83040" stroke="#761018" stroke-width="0.8"/>
+          <text x="100" y="240" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#444">UR7e arm + plate + ball</text>
+        </g>
+
+        <!-- Legend at bottom -->
+        <g font-family="Fraunces" font-style="italic" font-size="10" fill="#444" transform="translate(40 348)">
+          <line x1="0" y1="0" x2="14" y2="0" stroke="#003262" stroke-width="2.4"/>
+          <text x="20" y="4">ROS 2 over the network</text>
+          <line x1="160" y1="0" x2="174" y2="0" stroke="#888" stroke-width="1.8" stroke-dasharray="3 2"/>
+          <text x="180" y="4">USB</text>
+          <line x1="230" y1="0" x2="244" y2="0" stroke="#444" stroke-width="3.2"/>
+          <text x="250" y="4">industrial arm cable</text>
+          <rect x="380" y="-5" width="10" height="10" fill="none" stroke="#c4820e" stroke-width="1.4" stroke-dasharray="3 2"/>
+          <text x="395" y="4">ROS 2 domain</text>
+        </g>
+      </svg>
+      <figcaption><span class="fig-num">Figure 1.</span> Physical setup. The workstation runs the vision and controller nodes, the optional visualiser, and any rosbag tooling; it sees the camera over USB and the UR Control Box over the local network. The UR Control Box runs the manufacturer's <code>ros2_control</code> joint-trajectory controller and drives the arm. Workstation and Control Box live on the same ROS 2 domain.</figcaption>
+    </figure>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 2</span>Node graph</h3>
+    <p>
+      Each of the three layers of <a href="#sec-arch">§ 1</a> is implemented by one
+      or more ROS 2 nodes. The graph contains one perception node, one of
+      two interchangeable controller nodes, the UR driver
+      and joint-trajectory controller, and supporting infrastructure for
+      the transform tree and visualisation:
+    </p>
+    <div class="ctrl-walk ctrl-walk-mpc ros-cards ros-nodes" style="background:none; padding:0; margin: 1.5rem 0;">
+      <div class="walk-grid stagger">
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="6" width="18" height="13" rx="1.5"/><circle cx="12" cy="12.5" r="3.4"/><circle cx="12" cy="12.5" r="1.3" fill="currentColor" stroke="none"/><rect x="9" y="3" width="6" height="3" rx="0.5" fill="currentColor" stroke="none" opacity="0.8"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">ball_tracker</h4>
+          <p class="ros-msg">vision node</p>
+          <p>Opens a USB camera, runs ArUco-homography for the plate frame and HSV segmentation for the ball, fuses the result through a Kalman filter, and publishes <code>/ball_state</code>.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="4" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="20"/><line x1="4" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="20" y2="12"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">ball_balance_controller &middot; ball_balance_mpc</h4>
+          <p class="ros-msg">controller nodes (PID or MPC variant)</p>
+          <p>Two implementations of the same interface: the PID node of the <a href="control.html">PID page</a> and the MPC node of the <a href="mpc.html">MPC page</a>. Exactly one is brought up at a time; both subscribe to <code>/ball_state</code> and <code>/joint_states</code>, query the world-to-plate transform, and emit joint commands.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="5" width="18" height="13" rx="1.5"/><circle cx="9" cy="13" r="1.8" fill="currentColor" stroke="none"/><polyline points="9,13 14,10 18,15"/><line x1="3" y1="20" x2="21" y2="20"/><line x1="9" y1="22" x2="15" y2="22"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">ball_balance_visualizer</h4>
+          <p class="ros-msg">visualisation node</p>
+          <p>Republishes the live ball state and the reference trajectory as RViz markers on <code>/ball_balance_visualization</code>.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3.4"/><path d="M 12 4 L 12 7 M 12 17 L 12 20 M 4 12 L 7 12 M 17 12 L 20 12 M 6.3 6.3 L 8.5 8.5 M 15.5 15.5 L 17.7 17.7 M 6.3 17.7 L 8.5 15.5 M 15.5 8.5 L 17.7 6.3"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">scaled_joint_trajectory_controller &middot; forward_position_controller</h4>
+          <p class="ros-msg">UR-side <code>ros2_control</code> plugins</p>
+          <p>The MPC uses the joint-trajectory variant; the PID uses the forward-position variant. Both close the inner torque loop with gravity compensation and emit encoder readings on <code>/joint_states</code>.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="19" x2="5" y2="9"/><line x1="5" y1="19" x2="14" y2="19"/><polyline points="3,11 5,9 7,11"/><polyline points="12,17 14,19 12,21"/><line x1="13" y1="12" x2="13" y2="6"/><line x1="13" y1="12" x2="20" y2="12"/><polyline points="11,8 13,6 15,8"/><polyline points="18,10 20,12 18,14"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">robot_state_publisher &middot; static_transform_publisher</h4>
+          <p class="ros-msg">transform-tree infrastructure</p>
+          <p>Together they maintain the world $\to$ wrist $\to$ plate chain, which the controllers query for the plate-frame rotation at every tick.</p>
+        </div>
+
+      </div>
+    </div>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 900 500" style="margin: 0 auto; max-width: 100%; width: 100%;">
+        <defs>
+          <marker id="bX" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+          <marker id="gX" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4820e"/>
+          </marker>
+          <marker id="kX" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#888"/>
+          </marker>
+          <linearGradient id="visG" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#fef9ed"/>
+            <stop offset="100%" stop-color="#f5e0b6"/>
+          </linearGradient>
+          <linearGradient id="ctlG" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#eaf3fb"/>
+            <stop offset="100%" stop-color="#c4dceb"/>
+          </linearGradient>
+        </defs>
+
+        <!-- ===== Feedback arcs ABOVE the top row (so they never cross anything below) ===== -->
+        <g font-family="Fraunces" font-size="11" font-style="italic">
+          <!-- /joint_states: urfw(705,170) → ctrl(455,170), arc up -->
+          <path d="M 705 170 C 705 60 455 60 455 170"
+                fill="none" stroke="#003262" stroke-width="1.4" stroke-dasharray="5 3"
+                marker-end="url(#bX)"/>
+          <text x="580" y="55" text-anchor="middle" fill="#003262" font-weight="600">/joint_states</text>
+
+          <!-- /plate_cmd: ctrl(455,170) → tracker(235,170), arc up higher -->
+          <path d="M 455 170 C 455 25 235 25 235 170"
+                fill="none" stroke="#003262" stroke-width="1.4" stroke-dasharray="5 3"
+                marker-end="url(#bX)"/>
+          <text x="345" y="20" text-anchor="middle" fill="#003262" font-weight="600">/plate_cmd</text>
+        </g>
+
+        <!-- ===== Top row: forward path (camera → tracker → controller → UR firmware → arm) ===== -->
+        <g font-family="Fraunces" font-size="12">
+          <!-- camera -->
+          <rect x="30" y="170" width="90" height="60" rx="10" fill="#f3f3f1" stroke="#888" stroke-width="1.2"/>
+          <text x="75" y="194" text-anchor="middle" fill="#555" font-weight="600">USB camera</text>
+          <text x="75" y="211" text-anchor="middle" fill="#888" font-size="10" font-style="italic">60 Hz</text>
+
+          <!-- ball_tracker -->
+          <rect x="160" y="170" width="150" height="60" rx="12" fill="url(#visG)" stroke="#c4820e" stroke-width="1.8"/>
+          <text x="235" y="194" text-anchor="middle" fill="#8d5e0a" font-weight="700" font-size="13">ball_tracker</text>
+          <text x="235" y="212" text-anchor="middle" fill="#8d5e0a" font-size="10" font-style="italic">ArUco · HSV · Kalman</text>
+
+          <!-- controller node (PID or MPC) -->
+          <rect x="370" y="170" width="170" height="60" rx="12" fill="url(#ctlG)" stroke="#003262" stroke-width="1.8"/>
+          <text x="455" y="194" text-anchor="middle" fill="#003262" font-weight="700" font-size="13">controller node</text>
+          <text x="455" y="212" text-anchor="middle" fill="#003262" font-size="10" font-style="italic">PID or MPC variant</text>
+
+          <!-- UR firmware (shifted right for label clearance) -->
+          <rect x="640" y="170" width="130" height="60" rx="10" fill="#f3f3f1" stroke="#888" stroke-width="1.2"/>
+          <text x="705" y="194" text-anchor="middle" fill="#555" font-weight="600">UR firmware</text>
+          <text x="705" y="212" text-anchor="middle" fill="#888" font-size="10" font-style="italic">ros2_control · JTC</text>
+
+          <!-- arm -->
+          <rect x="810" y="170" width="70" height="60" rx="10" fill="#f3f3f1" stroke="#888" stroke-width="1.2"/>
+          <text x="845" y="205" text-anchor="middle" fill="#555" font-weight="600">UR7e</text>
+        </g>
+
+        <!-- ===== Forward arrows along the top row (all at y=200) ===== -->
+        <g font-family="Fraunces" font-size="10" font-style="italic">
+          <!-- camera → tracker (not a ROS topic) -->
+          <line x1="120" y1="200" x2="158" y2="200" stroke="#888" stroke-width="1.5" marker-end="url(#kX)"/>
+          <text x="139" y="192" text-anchor="middle" fill="#666">frame</text>
+
+          <!-- tracker → controller -->
+          <line x1="310" y1="200" x2="368" y2="200" stroke="#c4820e" stroke-width="2.2" marker-end="url(#gX)"/>
+          <text x="339" y="192" text-anchor="middle" fill="#c4820e" font-weight="700">/ball_state</text>
+
+          <!-- controller → UR firmware -->
+          <line x1="540" y1="200" x2="638" y2="200" stroke="#003262" stroke-width="2" marker-end="url(#bX)"/>
+          <text x="589" y="192" text-anchor="middle" fill="#003262" font-weight="600">joint cmd</text>
+
+          <!-- UR firmware → arm -->
+          <line x1="770" y1="200" x2="808" y2="200" stroke="#888" stroke-width="1.5" marker-end="url(#kX)"/>
+          <text x="789" y="192" text-anchor="middle" fill="#666">τ</text>
+        </g>
+
+        <!-- ===== Middle row: TF infrastructure, directly below the controller ===== -->
+        <g font-family="Fraunces" font-size="11.5">
+          <rect x="370" y="300" width="170" height="50" rx="10" fill="#f3f3f1" stroke="#888" stroke-width="1.2"/>
+          <text x="455" y="322" text-anchor="middle" fill="#666" font-weight="600" font-size="11">robot_state_publisher</text>
+          <text x="455" y="338" text-anchor="middle" fill="#888" font-size="10" font-style="italic">+ static_transform_publisher</text>
+        </g>
+
+        <!-- TF arrow: middle row → controller (short vertical) -->
+        <line x1="455" y1="300" x2="455" y2="232" stroke="#888" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#kX)"/>
+        <text x="463" y="270" font-family="Fraunces" font-size="10" font-style="italic" fill="#666">/tf, /tf_static</text>
+
+        <!-- ===== Bottom row: visualizer + RViz ===== -->
+        <g font-family="Fraunces" font-size="11.5">
+          <rect x="370" y="390" width="170" height="50" rx="10" fill="url(#ctlG)" stroke="#003262" stroke-width="1.5"/>
+          <text x="455" y="411" text-anchor="middle" fill="#003262" font-weight="600">ball_balance_visualizer</text>
+          <text x="455" y="427" text-anchor="middle" fill="#003262" font-size="10" font-style="italic">→ /ball_balance_visualization</text>
+
+          <rect x="640" y="390" width="130" height="50" rx="10" fill="#f3f3f1" stroke="#888" stroke-width="1.2"/>
+          <text x="705" y="411" text-anchor="middle" fill="#555" font-weight="600">RViz</text>
+          <text x="705" y="427" text-anchor="middle" fill="#888" font-size="10" font-style="italic">optional viewer</text>
+        </g>
+
+        <!-- /ball_state to visualizer: route DOWN from tracker, curve right BELOW TF infra, up to viz left edge -->
+        <path d="M 235 230 C 235 380 295 415 370 415"
+              fill="none" stroke="#c4820e" stroke-width="1.4" stroke-dasharray="5 3"
+              marker-end="url(#gX)"/>
+        <text x="265" y="370" font-family="Fraunces" font-size="10" font-style="italic" fill="#c4820e">/ball_state</text>
+
+        <!-- visualizer → RViz -->
+        <line x1="540" y1="415" x2="638" y2="415" stroke="#003262" stroke-width="1.4" marker-end="url(#bX)"/>
+        <text x="589" y="408" font-family="Fraunces" font-size="10" font-style="italic" fill="#666">markers</text>
+
+        <!-- ===== Legend (bottom) ===== -->
+        <g font-family="Fraunces" font-size="10" font-style="italic" transform="translate(30 475)">
+          <line x1="0" y1="0" x2="14" y2="0" stroke="#003262" stroke-width="2"/>
+          <text x="20" y="4" fill="#444">forward path</text>
+          <line x1="115" y1="0" x2="129" y2="0" stroke="#003262" stroke-width="1.3" stroke-dasharray="4 3"/>
+          <text x="135" y="4" fill="#444">feedback / TF</text>
+          <rect x="245" y="-5" width="10" height="10" fill="url(#visG)" stroke="#c4820e" stroke-width="0.9"/>
+          <text x="260" y="4" fill="#444">vision</text>
+          <rect x="308" y="-5" width="10" height="10" fill="url(#ctlG)" stroke="#003262" stroke-width="0.9"/>
+          <text x="323" y="4" fill="#444">first-party control</text>
+          <rect x="425" y="-5" width="10" height="10" fill="#f3f3f1" stroke="#888" stroke-width="0.9"/>
+          <text x="440" y="4" fill="#444">UR driver / infrastructure</text>
+        </g>
+      </svg>
+      <figcaption><span class="fig-num">Figure 1.</span> Runtime ROS 2 graph. Forward path along the central row (camera $\to$ vision $\to$ controller $\to$ firmware $\to$ arm). Feedback topics arc above; the transform tree lives below the controller; the visualisation branch sits at the bottom.</figcaption>
+    </figure>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 3</span>Topics</h3>
+    <p>
+      The arrows in Figure 1 correspond to seven named topics. Each topic
+      has a fixed message type; the controller and the tracker use a mix of
+      standard ROS 2 messages and one custom message detailed in § 4.
+    </p>
+    <div class="ctrl-walk ctrl-walk-pid ros-cards" style="background:none; padding:0; margin: 1.5rem 0;">
+      <div class="walk-grid stagger">
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="6" fill="currentColor" opacity="0.85" stroke="none"/><circle cx="14" cy="10" r="1.6" fill="white" stroke="none"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">/ball_state</h4>
+          <p class="ros-msg">ball_tracker_msgs/BallState &middot; sensor-data QoS</p>
+          <p class="ros-direction">tracker $\to$ controller, visualiser</p>
+          <p>Custom message bundling ball position, velocity, and tracker-health flags into a single timestamped snapshot (§ 4).</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="6" y1="4" x2="6" y2="20"/><line x1="6" y1="12" x2="14" y2="12"/><line x1="14" y1="12" x2="18" y2="20"/><circle cx="6" cy="12" r="2.2" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="2.2" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">/joint_states</h4>
+          <p class="ros-msg">sensor_msgs/JointState</p>
+          <p class="ros-direction">UR firmware $\to$ controller, robot_state_publisher</p>
+          <p>Joint encoder readings used by the rotational Jacobian in the controller and by the TF tree for the world-to-plate rotation.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="16" y2="18"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">/forward_position_controller/commands</h4>
+          <p class="ros-msg">std_msgs/Float64MultiArray</p>
+          <p class="ros-direction">PID node $\to$ UR firmware</p>
+          <p>Six target joint positions per tick. The firmware closes the inner torque loop on these setpoints.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3,18 8,14 12,15 16,9 21,6"/><circle cx="3" cy="18" r="1.6" fill="currentColor" stroke="none"/><circle cx="8" cy="14" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="15" r="1.6" fill="currentColor" stroke="none"/><circle cx="16" cy="9" r="1.6" fill="currentColor" stroke="none"/><circle cx="21" cy="6" r="1.6" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">/scaled_joint_trajectory_controller/joint_trajectory</h4>
+          <p class="ros-msg">trajectory_msgs/JointTrajectory</p>
+          <p class="ros-direction">MPC node $\to$ UR firmware</p>
+          <p>A single waypoint per tick. The firmware interpolates to the target over the trajectory time.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="3" rx="0.6" transform="rotate(-15 12 12.5)" fill="currentColor" opacity="0.75" stroke="none"/><path d="M 15 13 A 4 4 0 0 0 15 9" fill="none"/><line x1="3" y1="20" x2="21" y2="20" stroke-dasharray="3 2" opacity="0.5"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">/plate_cmd</h4>
+          <p class="ros-msg">geometry_msgs/Vector3Stamped &middot; optional</p>
+          <p class="ros-direction">active controller $\to$ tracker</p>
+          <p>Commanded plate-tilt angles. When consumed by the tracker, they feed the Kalman filter's predict step as a gravity model.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="5" width="18" height="13" rx="1.5"/><circle cx="9" cy="13" r="1.6" fill="currentColor" stroke="none"/><polyline points="9,13 14,10 18,15"/><line x1="3" y1="20" x2="21" y2="20"/><line x1="9" y1="22" x2="15" y2="22"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">/ball_balance_visualization</h4>
+          <p class="ros-msg">visualization_msgs/MarkerArray</p>
+          <p class="ros-direction">visualiser $\to$ RViz</p>
+          <p>Plate geometry, live ball position, and reference trajectory rendered as RViz markers.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="19" x2="5" y2="9"/><line x1="5" y1="19" x2="14" y2="19"/><polyline points="3,11 5,9 7,11"/><polyline points="12,17 14,19 12,21"/><line x1="13" y1="12" x2="13" y2="6"/><line x1="13" y1="12" x2="20" y2="12"/><polyline points="11,8 13,6 15,8"/><polyline points="18,10 20,12 18,14"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">/tf, /tf_static</h4>
+          <p class="ros-msg">tf2_msgs/TFMessage</p>
+          <p class="ros-direction">robot_state_publisher $\to$ controller</p>
+          <p>Transform-tree messages. The controller queries the buffer for the latest world $\to$ plate rotation at every tick.</p>
+        </div>
+
+      </div>
+    </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 4</span>Custom <code>BallState</code> message</h3>
+    <p>
+      Of the seven topics in § 3, six use stock ROS 2 message types
+      (<code>JointState</code>, <code>JointTrajectory</code>,
+      <code>Vector3Stamped</code>, <code>MarkerArray</code>, and the TF
+      messages). The seventh, <code>/ball_state</code>, carries a custom
+      message: the standard <code>geometry_msgs/Point</code> only encodes
+      $(x, y, z)$, which is not enough, because the controller needs the
+      ball velocity as well as the position, and it must gate on
+      tracker-health flags before acting on a stale or occluded sample.
+      Packing all of this into a single timestamped snapshot keeps the
+      controller from having to align state, validity, and marker count
+      from separate topics. The fields are:
+    </p>
+    <div class="ctrl-walk ctrl-walk-rl ros-cards" style="background:none; padding:0; margin: 1.5rem 0;">
+      <div class="walk-grid stagger">
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="8"/><polyline points="12,7 12,12 16,14"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">header</h4>
+          <p class="ros-msg">std_msgs/Header</p>
+          <p>Frame id <code>plate_center</code> (position and velocity live in the plate frame) and the publish timestamp; used by subscribers for staleness checks.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="4" y1="20" x2="20" y2="20"/><line x1="4" y1="20" x2="4" y2="4"/><polyline points="2,6 4,4 6,6"/><polyline points="18,18 20,20 18,22"/><circle cx="14" cy="10" r="2.2" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">x, y</h4>
+          <p class="ros-msg">ball position &middot; float64 &middot; metres</p>
+          <p>Ball-centre coordinates in $\{P\}$.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="17" y2="12"/><polyline points="14,8 18,12 14,16"/><line x1="4" y1="6" x2="9" y2="6"/><line x1="4" y1="18" x2="9" y2="18"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">vx, vy</h4>
+          <p class="ros-msg">ball velocity &middot; float64 &middot; m/s</p>
+          <p>Time derivative of the ball position, output of the Kalman filter.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">ball_found</h4>
+          <p class="ros-msg">bool &middot; detection flag</p>
+          <p>True when the current frame contains a fresh detection; false during Kalman coast (predict-only).</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M 4 6 L 12 4 L 20 6 L 20 14 C 20 18 16 21 12 22 C 8 21 4 18 4 14 Z"/><polyline points="9,12 11,14 15,9"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">tracking_valid</h4>
+          <p class="ros-msg">bool &middot; safety gate</p>
+          <p>True when the filter is producing a usable estimate (either fresh detection or within the coast window). The controllers gate their action on this flag.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="0.5"/><rect x="14" y="3" width="7" height="7" rx="0.5"/><rect x="3" y="14" width="7" height="7" rx="0.5"/><rect x="14" y="14" width="7" height="7" rx="0.5"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">markers_found</h4>
+          <p class="ros-msg">int32 &middot; 0&ndash;4</p>
+          <p>Number of ArUco markers visible. The plate homography is only valid when all four are seen; the controller falls back to home recovery when this count drops below the safety threshold.</p>
+        </div>
+
+        <div class="walk-card reveal-scale">
+          <span class="walk-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="1"/><line x1="9" y1="3" x2="9" y2="21" opacity="0.5"/><line x1="15" y1="3" x2="15" y2="21" opacity="0.5"/><line x1="3" y1="9" x2="21" y2="9" opacity="0.5"/><line x1="3" y1="15" x2="21" y2="15" opacity="0.5"/><rect x="15" y="9" width="6" height="6" fill="currentColor" stroke="none" opacity="0.85"/>
+            </svg>
+          </span>
+          <h4 class="ros-topic">pixel_u, pixel_v</h4>
+          <p class="ros-msg">float64 &middot; debug only</p>
+          <p>Raw pixel coordinates of the detection. Used by overlays only; the controller never reads them.</p>
+        </div>
+
+      </div>
+    </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 5</span>One control cycle</h3>
+    <p>
+      Putting the nodes, the topics, and the message together, a single
+      closed-loop iteration runs through six stages, clockwise around the
+      loop:
+    </p>
+
+    <div class="cycle-clock-wrap">
+      <div class="cycle-clock">
+
+        <div class="cycle-card pos-1 reveal-scale">
+          <span class="cycle-num">1</span>
+          <h5>Frame in</h5>
+          <p>The vision node reads the next frame from the USB camera.</p>
+        </div>
+
+        <div class="cycle-card pos-2 reveal-scale">
+          <span class="cycle-num">2</span>
+          <h5>BallState out</h5>
+          <p>Perception (ArUco + HSV + Kalman) runs; the resulting ball state is published on <code>/ball_state</code>.</p>
+        </div>
+
+        <div class="cycle-card pos-3 reveal-scale">
+          <span class="cycle-num">3</span>
+          <h5>Controller wakes</h5>
+          <p>The active controller reads the new <code>/ball_state</code>, the latest <code>/joint_states</code>, and the world-to-plate transform from the TF buffer.</p>
+        </div>
+
+        <div class="cycle-card pos-4 reveal-scale">
+          <span class="cycle-num">4</span>
+          <h5>Joint command out</h5>
+          <p>The five-stage pipeline of the <a href="control.html">control page</a> runs and emits a joint command to the UR firmware.</p>
+        </div>
+
+        <div class="cycle-card pos-5 reveal-scale">
+          <span class="cycle-num">5</span>
+          <h5>Torque loop</h5>
+          <p>The UR-side controller interpolates between waypoints and runs an internal joint-space PD controller with gravity compensation; encoders publish back on <code>/joint_states</code>.</p>
+        </div>
+
+        <div class="cycle-card pos-6 reveal-scale">
+          <span class="cycle-num">6</span>
+          <h5>Plate-tilt feedforward</h5>
+          <p>The controller publishes the commanded plate tilt on <code>/plate_cmd</code>, which the tracker uses as a gravity model in the next Kalman predict step.</p>
+        </div>
+
+      </div>
+      <p class="cycle-loop-note">After step 6 the next frame arrives and the cycle starts over from step 1.</p>
+    </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 6</span>Launch composition</h3>
+    <p>
+      The graph described above is brought up at runtime by two independent
+      launch files: one for the vision pipeline, one for the controller
+      stack. The split allows the tracker to run on the perception machine
+      and the controller to run on the machine that has the UR network,
+      joined only by the ROS 2 domain. Choosing the PID or the MPC variant
+      amounts to picking which controller launch is started; the tracker
+      launch is unchanged.
+    </p>
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 900 360" style="margin: 0 auto; max-width: 100%; width: 100%;">
+        <defs>
+          <marker id="lkX" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#777"/>
+          </marker>
+          <linearGradient id="lcGold" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#fef9ed"/>
+            <stop offset="100%" stop-color="#f5e0b6"/>
+          </linearGradient>
+          <linearGradient id="lcBlue" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#eaf3fb"/>
+            <stop offset="100%" stop-color="#c4dceb"/>
+          </linearGradient>
+        </defs>
+
+        <!-- tracker_launch.py (left) -->
+        <g>
+          <rect x="30" y="40" width="320" height="260" rx="12" fill="url(#lcGold)" stroke="#c4820e" stroke-width="2"/>
+          <text x="190" y="68" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="15" fill="#8d5e0a">tracker_launch.py</text>
+          <text x="190" y="87" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11.5" fill="#8d5e0a">vision pipeline</text>
+          <line x1="60" y1="98" x2="320" y2="98" stroke="#c4820e" stroke-width="0.8" stroke-dasharray="3 2"/>
+
+          <rect x="60" y="115" width="260" height="56" rx="8" fill="#fff" stroke="#c4820e" stroke-width="1.2"/>
+          <text x="190" y="138" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#8d5e0a">ball_tracker</text>
+          <text x="190" y="156" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#8d5e0a">tracker_params.yaml</text>
+
+          <text x="190" y="208" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11.5" fill="#8d5e0a">publishes</text>
+          <text x="190" y="228" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="13" fill="#c4820e">/ball_state</text>
+
+          <text x="190" y="262" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11.5" fill="#8d5e0a">optionally subscribes</text>
+          <text x="190" y="282" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="13" fill="#003262">/plate_cmd</text>
+        </g>
+
+        <!-- balance.launch.py or mpc_balance.launch.py (right) -->
+        <g>
+          <rect x="395" y="40" width="475" height="260" rx="12" fill="url(#lcBlue)" stroke="#003262" stroke-width="2"/>
+          <text x="632" y="68" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="15" fill="#003262">balance.launch.py</text>
+          <text x="632" y="87" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11.5" fill="#003262">PID variant &middot; or mpc_balance.launch.py for MPC</text>
+          <line x1="425" y1="98" x2="840" y2="98" stroke="#003262" stroke-width="0.8" stroke-dasharray="3 2"/>
+
+          <!-- adapter static tf -->
+          <rect x="420" y="115" width="195" height="56" rx="8" fill="#fff" stroke="#003262" stroke-width="1.2"/>
+          <text x="517" y="138" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">static_transform_publisher</text>
+          <text x="517" y="156" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">wrist &rarr; plate adapter</text>
+
+          <!-- controller -->
+          <rect x="645" y="115" width="195" height="56" rx="8" fill="#fff" stroke="#003262" stroke-width="1.2"/>
+          <text x="742" y="138" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">controller node</text>
+          <text x="742" y="156" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">PID or MPC variant</text>
+
+          <!-- visualizer + rviz -->
+          <rect x="420" y="185" width="195" height="56" rx="8" fill="#fff" stroke="#003262" stroke-width="1.2" stroke-dasharray="3 2"/>
+          <text x="517" y="208" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">ball_balance_visualizer</text>
+          <text x="517" y="226" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">conditional on rviz arg</text>
+
+          <rect x="645" y="185" width="195" height="56" rx="8" fill="#fff" stroke="#003262" stroke-width="1.2" stroke-dasharray="3 2"/>
+          <text x="742" y="208" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">rviz2</text>
+          <text x="742" y="226" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">conditional on rviz arg</text>
+
+          <text x="632" y="262" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11.5" fill="#003262">publishes</text>
+          <text x="632" y="282" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="12" fill="#003262">/forward_position_controller/commands &middot; /plate_cmd</text>
+        </g>
+
+        <!-- legend / note -->
+        <text x="450" y="335" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#666">launches communicate via the ROS 2 graph; <tspan font-weight="700" fill="#c4820e">/ball_state</tspan> and <tspan font-weight="700" fill="#003262">/plate_cmd</tspan> bridge the two</text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 2.</span> Launch composition. The vision pipeline and the controller stack are brought up by separate launch files; they share data via the ROS 2 graph rather than a direct interface. Choosing the PID or MPC controller is a matter of which controller launch is used; the tracker is unchanged.</figcaption>
+    </figure>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 7</span>Notation and acronyms</h3>
+    <dl class="notation-list">
+      <dt>ROS 2</dt><dd>Robot Operating System 2.</dd>
+      <dt>QoS</dt><dd>Quality of Service profile (reliability and history settings of a topic).</dd>
+      <dt>TF</dt><dd>transform tree (ROS message tree of coordinate frames over time).</dd>
+      <dt>URDF</dt><dd>Unified Robot Description Format — XML description of the arm geometry.</dd>
+      <dt>UR</dt><dd>Universal Robots, the manufacturer of the arm.</dd>
+      <dt>scaled JTC</dt><dd>scaled joint-trajectory controller, the UR-side <code>ros2_control</code> plugin.</dd>
+    </dl>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 8</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Macenski, S., Foote, T., Gerkey, B., Lalancette, C., Woodall, W.</span> (2022).
+          <span class="bib-title">Robot Operating System 2: Design, architecture, and uses in the wild</span>.
+          <span class="bib-venue">Science Robotics, 7(66), eabm6074</span>.
+          <a class="bib-link" href="https://doi.org/10.1126/scirobotics.abm6074" target="_blank" rel="noopener">doi.org/10.1126/scirobotics.abm6074</a>
+        </li>
+        <li>
+          <span class="bib-authors">Coleman, D., Sucan, I. A., Chitta, S., Correll, N.</span> (2014).
+          <span class="bib-title">Reducing the barrier to entry of complex robotic software: a MoveIt! case study</span>.
+          <span class="bib-venue">Journal of Software Engineering for Robotics, 5(1), 3–16</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1404.3785" target="_blank" rel="noopener">arxiv.org/abs/1404.3785</a>
+        </li>
+        <li>
+          <span class="bib-authors">Sucan, I. A., Moll, M., Kavraki, L. E.</span> (2012).
+          <span class="bib-title">The Open Motion Planning Library</span>.
+          <span class="bib-venue">IEEE Robotics &amp; Automation Magazine, 19(4), 72–82</span>.
+          <a class="bib-link" href="https://doi.org/10.1109/MRA.2012.2205651" target="_blank" rel="noopener">doi.org/10.1109/MRA.2012.2205651</a>
+        </li>
+        <li>
+          <span class="bib-authors">Foote, T.</span> (2013).
+          <span class="bib-title">tf: the transform library</span>.
+          <span class="bib-venue">IEEE TePRA, pp. 1–6</span>.
+          <a class="bib-link" href="https://doi.org/10.1109/TePRA.2013.6556373" target="_blank" rel="noopener">doi.org/10.1109/TePRA.2013.6556373</a>
+        </li>
+        <li>
+          <span class="bib-authors">Andersen, T. T.</span> (2015).
+          <span class="bib-title">Optimizing the Universal Robots ROS driver</span>.
+          <span class="bib-venue">Technical Univ. of Denmark, Dept. of Electrical Engineering</span>.
+          <a class="bib-link" href="https://orbit.dtu.dk/en/publications/optimizing-the-universal-robots-ros-driver" target="_blank" rel="noopener">orbit.dtu.dk/en/publications</a>
+        </li>
+        <li>
+          <span class="bib-authors">Sandoval Magallanes, J. A., et al.</span> (2025).
+          <span class="bib-title">A ROS 2 interface for Universal Robots collaborative manipulators based on ur_rtde</span>.
+          <span class="bib-venue">arXiv:2511.17237</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/2511.17237" target="_blank" rel="noopener">arxiv.org/abs/2511.17237</a>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

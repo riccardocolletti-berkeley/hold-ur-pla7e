@@ -1,0 +1,83 @@
+# =============================================================================
+# Parameters for the ball-balance PID ROS 2 controller node and the
+# visualizer that runs alongside it.
+#
+# The reference trajectory lives in config/reference.yaml (shared with the
+# MPC node and the tracker). The launch file loads both files, so editing
+# the trajectory means touching reference.yaml only.
+#
+# Tuning reference for ball-on-plate at 30 Hz:
+#   ball acceleration on a tilted plate ≈ (5/7)·g·θ ≈ 7·θ rad/s²
+#   ωn ≈ sqrt(7·kp), critical-damping kd ≈ 2·sqrt(kp/7)
+# =============================================================================
+
+ball_balance_controller:
+  ros__parameters:
+
+    # ── URDF + base pose ──────────────────────────────────────────────────────
+    # urdf_path is supplied by the launch file (defaults to the bundled UR7e
+    # URDF). Override per-run with:
+    #   ros2 launch ball_balance_controller balance.launch.py \
+    #     urdf_path:=/opt/ros/humble/share/ur_description/urdf/ur5e.urdf
+    # Setting it here is unsafe: the specific-node block takes precedence over
+    # the launch override (which lands in the /** namespace), and an empty
+    # string would silently win.
+    home_joints: [0.5, -2.35, 2.65, -1.85, 1.57, 0.0]
+
+    world_frame: "base_link"
+    plate_frame: "plate_center"
+
+    # ── PID gains ─────────────────────────────────────────────────────────────
+    # (ux, uy) is interpreted as a desired plate tilt in radians, projected to
+    # a joint offset by the rotational Jacobian.
+    kp:  0.5000
+    ki:  1.000
+    kd:  1.2000
+    kff: 0.0000
+
+    # ── Safety limits ─────────────────────────────────────────────────────────
+    max_tilt_rad:        0.150     # plate tilt cap per axis (~8.6°)
+    max_joint_delta_rad: 0.150     # per-joint offset cap from home
+    deadband_m:          0.001     # position deadband
+    integral_limit:      0.060     # PID anti-windup
+    error_clip_m:        0.020     # clip position error fed into P/I (per axis)
+    velocity_clip_mps:   2.000     # clip ball-velocity into the linear D regime
+    max_dt_s:            0.050     # control dt clip; one slow tick won't blow up I
+
+    # ── Timing and filtering ──────────────────────────────────────────────────
+    # Above ~200 Hz the UR scaled trajectory controller's 0.2 rad state
+    # tolerance starts to bite (the joint cannot catch up under its velocity
+    # limit). 200 Hz is plenty for ball dynamics on the order of 1 Hz.
+    command_rate_hz:     200.0
+    command_alpha:         0.99   # one-pole LPF on Δq (near-passthrough at 200 Hz)
+    trajectory_time_s:     0.050  # blended ramp horizon for the scaled controller
+    startup_home_time_s:   1.00   # settle at home before engaging PID
+    return_to_base_rate:   0.02   # per-tick exponential decay toward home
+
+    # ── Tracker freshness limits ──────────────────────────────────────────────
+    # Wide windows: the recovery branch is for genuine sensor failures, not
+    # blink-frame dropouts during fast rolls.
+    stale_ball_state_s:   5.00
+    missing_ball_grace_s: 5.00
+
+    # ── Marker visibility threshold ───────────────────────────────────────────
+    # TableFrame's bootstrap requires all four markers; afterwards a single
+    # characterised marker is enough to refit the homography. This threshold
+    # is the additional safety margin before falling back to home.
+    markers_min_visible: 2
+
+    # ── Joint locking ─────────────────────────────────────────────────────────
+    # Spec parsed by ballplate.control.parse_lock_spec:
+    #   "config" : read indices from config/control.yaml (shared with sim)
+    #   "none"   : no joints locked
+    #   "all"    : every joint pinned at home
+    #   "0,1,2"  : comma-separated indices
+    locked_joints_spec: "config"
+
+ball_balance_visualizer:
+  ros__parameters:
+    # Number of samples drawn along one period of the reference path.
+    reference_overlay_samples: 240
+    publish_rate_hz:            60.0
+    # Length of the orange ball-position trail. 0 disables the trail.
+    ball_trail_seconds:          4.0

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Domain randomisation · Hold UR Pla7e</title>
+  <meta name="description" content="Benchmark results: drop rate and tracking RMSE for PID and Residual PPO across eight perturbed simulation domains and the nominal one." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+  <style>
+    table.bench { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.92rem; }
+    table.bench th, table.bench td { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); text-align: right; }
+    table.bench th { background: var(--bg-soft); font-family: var(--font-display); font-weight: 600; color: var(--berkeley-blue); text-align: center; font-size: 0.85rem; }
+    table.bench td:first-child, table.bench th:first-child { text-align: left; }
+    table.bench tr.alt { background: rgba(0,50,98,0.025); }
+    table.bench .gain { color: var(--berkeley-gold-dark); font-family: var(--font-mono); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Benchmark across the DR envelope</p>
+      <h1>Domain randomisation</h1>
+      <p class="lead">
+        The residual policy of <a href="rl.html">§ 1</a> is benchmarked against the
+        deployed PID across nine simulation conditions: a nominal baseline that
+        matches the calibrated lab setup, plus eight perturbations that each push a
+        single physical parameter outside the tuning window (weaker or stronger
+        gravity, a more slippery or a more sticky plate, a heavier ball, noisier
+        vision, longer actuation delay, and a combined condition that varies all of
+        them at once). Each (condition, controller) pair is run for $30$ episodes
+        with seeds shared across controllers. The residual reduces the drop rate
+        under every perturbation. The largest reductions are under stronger
+        gravity ($0.70 \to 0.03$) and on a high-friction plate ($0.33 \to 0.00$).
+      </p>
+    </div>
+  </header>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 1</span>Training curve</h3>
+    <p>
+      Mean episode reward of the Residual PPO policy across $60$ million PPO
+      timesteps, collected from $16$ parallel MuJoCo environments. The reward
+      climbs from near zero to roughly $200$ and plateaus once the linear
+      learning-rate schedule of the
+      <a href="rl.html#sec-training">training algorithm (§ 6 of the Residual PPO
+      page)</a> has decayed.
+    </p>
+    <figure class="fig">
+      <img src="../assets/images/ppo_training_curve.png" alt="PPO training curve" />
+      <figcaption><span class="fig-num">Figure 1.</span> Mean episode reward over PPO training, $60$ M timesteps.</figcaption>
+    </figure>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 2</span>Benchmark protocol</h3>
+    <p>
+      The PID of the <a href="control.html">PID page</a> and the trained Residual
+      PPO policy of the <a href="rl.html">Residual PPO page</a> are evaluated on
+      eight perturbed simulation domains plus the nominal one. Each (domain,
+      policy) cell is run for $30$ episodes with fixed per-episode seeds shared
+      across policies, so the two controllers see the same random domain
+      parameters within a cell. Each episode lasts $600$ control steps. Two
+      scalar metrics are reported per cell: the <strong>drop rate</strong>, the
+      fraction of episodes in which the ball leaves the plate before the
+      horizon expires; and the <strong>tracking RMSE</strong>, the
+      root-mean-square position error against the reference trajectory averaged
+      over the surviving steps and over the $30$ episodes.
+    </p>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 3</span>Per-domain comparison</h3>
+
+    <figure class="fig">
+      <img src="../assets/images/ppo_benchmark_bar.png" alt="PID vs Residual PPO benchmark" />
+      <figcaption><span class="fig-num">Figure 2.</span> Drop rate (left) and tracking RMSE (right) across eight perturbed domains plus the nominal one. PID baseline against Residual PPO, $30$ episodes per cell.</figcaption>
+    </figure>
+
+    <p>
+      The numerical results behind Figure 2 are listed in Table 1. The residual
+      reduces the drop rate in every perturbed condition. The largest gain is
+      under stronger-than-nominal gravity, where $70\%$ of the PID episodes ended
+      with a dropped ball against $3\%$ for the residual; the smallest gain is
+      under weaker gravity ($40\% \to 27\%$), where the ball moves slowly enough
+      that the dynamics, not the controller, dominate the error. On the baseline
+      both controllers complete every episode.
+    </p>
+
+    <div class="table-scroll">
+    <table class="bench">
+      <caption style="caption-side: top; font-size: 0.85rem; font-style: italic; color: var(--text-soft); text-align: left; margin-bottom: 0.75rem;">Table 1. Drop rate and tracking RMSE per domain. Lower is better.</caption>
+      <thead>
+        <tr>
+          <th>Domain</th>
+          <th>Drop rate (PID)</th>
+          <th>Drop rate (Residual PPO)</th>
+          <th>RMSE PID [m]</th>
+          <th>RMSE Residual PPO [m]</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>standard</td><td>0.00</td><td>0.00</td><td>0.034</td><td>0.036</td></tr>
+        <tr class="alt"><td>slippery</td><td>0.20</td><td><span class="gain">0.03</span></td><td>0.053</td><td><span class="gain">0.038</span></td></tr>
+        <tr><td>sticky</td><td>0.33</td><td><span class="gain">0.00</span></td><td>0.074</td><td><span class="gain">0.035</span></td></tr>
+        <tr class="alt"><td>heavy_ball</td><td>0.30</td><td><span class="gain">0.03</span></td><td>0.068</td><td><span class="gain">0.039</span></td></tr>
+        <tr><td>low_gravity</td><td>0.40</td><td><span class="gain">0.27</span></td><td>0.091</td><td><span class="gain">0.070</span></td></tr>
+        <tr class="alt"><td>high_gravity</td><td>0.70</td><td><span class="gain">0.03</span></td><td>0.117</td><td><span class="gain">0.037</span></td></tr>
+        <tr><td>noisy_vision</td><td>0.30</td><td><span class="gain">0.03</span></td><td>0.075</td><td><span class="gain">0.040</span></td></tr>
+        <tr class="alt"><td>high_latency</td><td>0.30</td><td><span class="gain">0.20</span></td><td>0.075</td><td><span class="gain">0.054</span></td></tr>
+        <tr><td>full_dr</td><td>0.33</td><td><span class="gain">0.07</span></td><td>0.075</td><td><span class="gain">0.041</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 4</span>Example trajectory</h3>
+    <p>
+      A single episode on the nominal domain with a square reference trajectory.
+      Both controllers complete the trajectory without dropping the ball. The
+      square pattern exposes the corner-tracking behaviour: at each turn the
+      reference velocity changes direction discontinuously, and each controller
+      deviates slightly from the reference for a few control ticks before
+      catching up.
+    </p>
+    <figure class="fig">
+      <img src="../assets/images/ppo_square_overlay.png" alt="Square trajectory overlay" />
+      <figcaption><span class="fig-num">Figure 3.</span> A square reference trajectory, with the ball positions tracked by the PID and by Residual PPO overlaid. Both controllers complete the episode on the nominal domain.</figcaption>
+    </figure>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 5</span>Discussion</h3>
+    <p>
+      The PID was tuned at the nominal operating point and tracks the reference
+      well there. Its gains are fixed, so when the simulator moves away from
+      those conditions the closed-loop dynamics no longer match what the gains
+      were chosen for and the ball is lost. The residual policy was trained
+      across the whole envelope under domain randomisation; its drop rate stays
+      low across every perturbed condition, and it recovers most of the tracking
+      accuracy that the fixed-gain PID loses off nominal.
+    </p>
+    <p>
+      The smallest improvement is under weaker-than-nominal gravity. The ball
+      moves slowly, the dynamics evolve on a longer effective time horizon, and
+      the constant-velocity prior of the Kalman filter is least accurate in this
+      regime. The remaining error is dominated by estimation rather than
+      control, so both controllers degrade together.
+    </p>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 6</span>Notation</h3>
+    <dl class="notation-list">
+      <dt>RMSE</dt><dd>root-mean-square error.</dd>
+      <dt>Drop rate</dt><dd>fraction of episodes in which the ball leaves the plate before the $600$-step horizon expires.</dd>
+      <dt>Nominal domain</dt><dd>simulation with the mean values of the randomisation ranges and no perturbation.</dd>
+      <dt>DR</dt><dd>domain randomisation (see <a href="rl.html#sec-dr">§ 5 of the Residual PPO page</a>).</dd>
+    </dl>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 7</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Tobin, J., Fong, R., Ray, A., Schneider, J., Zaremba, W., Abbeel, P.</span> (2017).
+          <span class="bib-title">Domain randomization for transferring deep neural networks from simulation to the real world</span>.
+          <span class="bib-venue">IEEE/RSJ IROS, pp. 23–30</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1703.06907" target="_blank" rel="noopener">arxiv.org/abs/1703.06907</a>
+        </li>
+        <li>
+          <span class="bib-authors">Peng, X. B., Andrychowicz, M., Zaremba, W., Abbeel, P.</span> (2018).
+          <span class="bib-title">Sim-to-real transfer of robotic control with dynamics randomization</span>.
+          <span class="bib-venue">IEEE ICRA, pp. 3803–3810</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1710.06537" target="_blank" rel="noopener">arxiv.org/abs/1710.06537</a>
+        </li>
+        <li>
+          <span class="bib-authors">Chebotar, Y., Handa, A., Makoviychuk, V., Macklin, M., Issac, J., Ratliff, N., Fox, D.</span> (2019).
+          <span class="bib-title">Closing the sim-to-real loop: adapting simulation randomization with real world experience</span>.
+          <span class="bib-venue">IEEE ICRA, pp. 8973–8979</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1810.05687" target="_blank" rel="noopener">arxiv.org/abs/1810.05687</a>
+        </li>
+        <li>
+          <span class="bib-authors">OpenAI: Andrychowicz, M., Baker, B., Chociej, M., et al.</span> (2020).
+          <span class="bib-title">Learning dexterous in-hand manipulation</span>.
+          <span class="bib-venue">International Journal of Robotics Research, 39(1), 3–20</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1808.00177" target="_blank" rel="noopener">arxiv.org/abs/1808.00177</a>
+        </li>
+        <li>
+          <span class="bib-authors">OpenAI: Akkaya, I., Andrychowicz, M., Chociej, M., et al.</span> (2019).
+          <span class="bib-title">Solving Rubik's Cube with a robot hand</span>.
+          <span class="bib-venue">arXiv:1910.07113</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1910.07113" target="_blank" rel="noopener">arxiv.org/abs/1910.07113</a>
+        </li>
+        <li>
+          <span class="bib-authors">Mehta, B., Diaz, M., Golemo, F., Pal, C., Paull, L.</span> (2020).
+          <span class="bib-title">Active domain randomization</span>.
+          <span class="bib-venue">Conf. on Robot Learning (CoRL 2019), PMLR 100:1162–1176</span>.
+          <a class="bib-link" href="https://proceedings.mlr.press/v100/mehta20a.html" target="_blank" rel="noopener">proceedings.mlr.press/v100/mehta20a</a>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

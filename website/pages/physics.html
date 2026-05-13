@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Physics · Hold UR Pla7e</title>
+  <meta name="description" content="Ball-on-plate dynamics: rolling-without-slip ODEs on a tilted plate, plus the in-plane gravity model used by the simulator and the predictive controller." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body class="physics-page">
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Plate-tilt dynamics</p>
+      <h1>Rolling-without-slipping dynamics</h1>
+      <p class="lead">Newton-Euler derivation of the rolling-without-slipping equation of motion for a uniform solid sphere on a tilted plate, yielding the in-plane acceleration $\tfrac{5}{7}\, g \sin\theta_y$.</p>
+    </div>
+  </header>
+
+  <!-- ============== Step 1: Setup the scenario ============== -->
+  <section class="story-section">
+    <div class="container">
+      <div class="story-grid">
+        <div class="story-text reveal-l">
+          <p class="eyebrow">01 — Setup</p>
+          <h2>Setup</h2>
+          <p class="lead">
+            A planar plate is tilted by angle $\theta_y$ about its $\hat y$ axis. A uniform
+            solid sphere of mass $m$ and radius $\rho$ rests on the plate and is free to
+            translate along the slope. Gravity acts vertically.
+          </p>
+          <p style="color:var(--text-soft);">
+            $\theta_y = 0$ corresponds to the plate horizontal (no motion). $\theta_y > 0$
+            corresponds to the right side of the plate below the left, with the ball rolling
+            along the slope.
+          </p>
+        </div>
+        <div class="reveal-r">
+          <svg class="diagram" viewBox="0 0 460 320" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <pattern id="hatch" patternUnits="userSpaceOnUse" width="8" height="8">
+                <line x1="0" y1="8" x2="8" y2="0" stroke="#aaa" stroke-width="0.8"/>
+              </pattern>
+            </defs>
+            <!-- ground with hatching -->
+            <line x1="20" y1="280" x2="440" y2="280" stroke="#aaa" stroke-width="1"/>
+            <rect x="20" y="280" width="420" height="20" fill="url(#hatch)"/>
+            <!-- horizontal reference dashed -->
+            <line x1="40" y1="200" x2="380" y2="200" stroke="#bbb" stroke-width="1.4" stroke-dasharray="6 4"/>
+            <text x="388" y="204" fill="#888" font-size="11" font-family="Fraunces" font-style="italic">horizon</text>
+            <!-- tilted plate (pivot at (230, 200)). The ball is placed so its bottom
+                 is exactly tangent to the plate's TOP surface: cy = plate_top - r
+                 = 194 − 14 = 180. -->
+            <g transform="rotate(-15 230 200)">
+              <rect x="100" y="194" width="260" height="12" fill="#dcc093" stroke="#a48246" stroke-width="1.8" rx="3"/>
+              <circle cx="290" cy="180" r="14" fill="#c83040" stroke="#761018" stroke-width="1.4"/>
+              <line x1="290" y1="180" x2="298" y2="191" stroke="#fff" stroke-width="1.6"/>
+            </g>
+            <!-- θ angle arc, drawn at the right-hand pivot end of the plate so it
+                 clearly shows the angle between the dashed horizon and the plate's top edge. -->
+            <path d="M 290 200 A 60 60 0 0 0 287.9 184.5" fill="none" stroke="#6643a0" stroke-width="2.4"/>
+            <text x="306" y="195" fill="#6643a0" font-size="15" font-family="Fraunces" font-weight="700" font-style="italic">θ<tspan dy="3" font-size="10">y</tspan></text>
+            <circle cx="230" cy="200" r="3" fill="#222"/>
+            <!-- header labels well above the plate, no math markup -->
+            <text x="230" y="60" text-anchor="middle" fill="#003262" font-size="14" font-family="Fraunces" font-weight="600">tilted plate</text>
+            <text x="230" y="78" text-anchor="middle" fill="#888" font-size="11" font-family="Fraunces" font-style="italic">rotated by θ<tspan dy="3" font-size="9">y</tspan> from horizontal</text>
+            <text x="290" y="148" text-anchor="middle" fill="#761018" font-size="11" font-family="Fraunces" font-style="italic">solid sphere · mass m, radius ρ</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== Step 2: Reference frames ============== -->
+  <section class="story-section alt">
+    <div class="container">
+      <div class="story-grid flip">
+        <div class="story-text reveal-r">
+          <p class="eyebrow">02 — Reference frames</p>
+          <h2>Reference frames</h2>
+          <p class="lead">
+            Two frames are used. $\ddot x$ denotes the ball's acceleration along the plate's
+            $\hat x_P$ axis (i.e.\ along the slope).
+          </p>
+          <ul class="kv">
+            <li><div class="k">World frame {W}</div><div class="v">$\hat x_W, \hat y_W, \hat z_W$. Fixed; gravity points along $-\hat z_W$.</div></li>
+            <li><div class="k">Plate frame {P}</div><div class="v">$\hat x_P, \hat y_P, \hat z_P$. Attached to the plate; rotates with it.</div></li>
+            <li><div class="k">Tilt $\theta_y$</div><div class="v">Rotation of {P} about the world's $\hat y$ axis.</div></li>
+          </ul>
+          <p style="color:var(--text-soft);font-size:0.95rem;">
+            All velocities and accelerations referenced in this derivation
+            ($\ddot x$, $v$, $\omega$) are expressed in $\{P\}$.
+          </p>
+        </div>
+        <div class="reveal-l">
+          <svg class="diagram" viewBox="0 0 360 340" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <marker id="blue-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+              </marker>
+              <marker id="gold-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4820e"/>
+              </marker>
+              <linearGradient id="armLinkPhys" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#cfcfcf"/>
+                <stop offset="100%" stop-color="#a4a4a4"/>
+              </linearGradient>
+            </defs>
+
+            <!-- floor reference -->
+            <line x1="20" y1="305" x2="340" y2="305" stroke="#bbb" stroke-width="1.3" stroke-dasharray="5 4"/>
+
+            <!-- base + shoulder + upper arm + elbow + forearm + wrist cluster.
+                 Same layout as the setup page so the two pages share a visual frame. -->
+            <ellipse cx="95" cy="303" rx="40" ry="6" fill="#666"/>
+            <rect x="65" y="260" width="60" height="44" rx="6" fill="#dadada" stroke="#888" stroke-width="1.2"/>
+            <ellipse cx="95" cy="260" rx="30" ry="6" fill="#bbbbbb" stroke="#888" stroke-width="1.2"/>
+            <circle cx="95" cy="235" r="16" fill="#003262" stroke="#001a40" stroke-width="1.5"/>
+            <circle cx="95" cy="235" r="6" fill="#fdb515"/>
+            <rect x="89" y="155" width="12" height="80" fill="url(#armLinkPhys)" stroke="#777" stroke-width="1"/>
+            <circle cx="95" cy="155" r="14" fill="#003262" stroke="#001a40" stroke-width="1.5"/>
+            <rect x="95" y="149" width="155" height="12" fill="url(#armLinkPhys)" stroke="#777" stroke-width="1"/>
+            <circle cx="235" cy="155" r="11" fill="#4a7fa8" stroke="#003262" stroke-width="1.2"/>
+            <circle cx="250" cy="155" r="9" fill="#6643a0" stroke="#3d1d72" stroke-width="1.2"/>
+            <rect x="246" y="128" width="8" height="20" fill="#888"/>
+            <!-- plate centred above the wrist -->
+            <rect x="195" y="120" width="110" height="8" fill="#dcc093" stroke="#a48246" stroke-width="1.4" rx="2"/>
+            <circle cx="280" cy="113" r="6" fill="#c83040" stroke="#761018" stroke-width="1"/>
+
+            <!-- World frame {W} at the base -->
+            <line x1="95" y1="260" x2="160" y2="260" stroke="#003262" stroke-width="2.4" marker-end="url(#blue-ar)"/>
+            <text x="166" y="264" fill="#003262" font-size="13" font-family="Fraunces" font-style="italic">x̂<tspan dy="3" font-size="10">W</tspan></text>
+            <line x1="95" y1="260" x2="95" y2="200" stroke="#003262" stroke-width="2.4" marker-end="url(#blue-ar)"/>
+            <text x="100" y="195" fill="#003262" font-size="13" font-family="Fraunces" font-style="italic">ẑ<tspan dy="3" font-size="10">W</tspan></text>
+            <circle cx="95" cy="260" r="3" fill="#003262"/>
+            <text x="78" y="278" fill="#003262" font-size="12" font-family="Fraunces" font-style="italic">{W}</text>
+
+            <!-- Plate frame {P} at the geometric centre of the plate -->
+            <line x1="250" y1="124" x2="320" y2="124" stroke="#c4820e" stroke-width="2.4" marker-end="url(#gold-ar)"/>
+            <text x="326" y="127" fill="#c4820e" font-size="13" font-family="Fraunces" font-style="italic">x̂<tspan dy="3" font-size="10">P</tspan></text>
+            <line x1="250" y1="124" x2="250" y2="78" stroke="#c4820e" stroke-width="2.4" marker-end="url(#gold-ar)"/>
+            <text x="255" y="75" fill="#c4820e" font-size="13" font-family="Fraunces" font-style="italic">ẑ<tspan dy="3" font-size="10">P</tspan></text>
+            <circle cx="250" cy="124" r="3" fill="#c4820e"/>
+            <text x="218" y="115" fill="#c4820e" font-size="12" font-family="Fraunces" font-style="italic">$\{P\}$</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== Step 3: Free-body diagram ============== -->
+  <section class="story-section">
+    <div class="container">
+      <div class="story-grid">
+        <div class="story-text reveal-l">
+          <p class="eyebrow">03 — Free-body diagram</p>
+          <h2>Free-body diagram</h2>
+          <p class="lead">
+            The ball is acted upon by three forces.
+          </p>
+          <ul class="kv">
+            <li><div class="k">Gravity $m g$</div><div class="v">Vertical, along $-\hat z_W$.</div></li>
+            <li><div class="k">Normal $N$</div><div class="v">Along $+\hat z_P$, perpendicular to the plate surface.</div></li>
+            <li><div class="k">Static friction $f$</div><div class="v">Tangent to the plate, opposing the tendency of the contact point to slip; points up the slope ($-\hat x_P$).</div></li>
+          </ul>
+          <div class="callout">
+            <p>With $f = 0$ the sphere would slide down the slope without rotating;
+            $f$ is the force that produces the torque about the ball's centre and so
+            couples translation to rotation.</p>
+          </div>
+        </div>
+        <div class="reveal-r">
+          <svg class="diagram" viewBox="0 0 460 320" preserveAspectRatio="xMidYMid meet">
+            <!-- horizontal reference -->
+            <line x1="40" y1="200" x2="420" y2="200" stroke="#ccc" stroke-width="1" stroke-dasharray="4 4"/>
+            <!-- tilted plate with ball and contact-frame forces (friction f, normal N).
+                 The ball, f, and N are inside the rotated group so they stay anchored to
+                 the plate surface. The friction label uses a counter-rotation so the text
+                 stays upright in the image. -->
+            <g transform="rotate(-18 230 200)">
+              <rect x="80" y="190" width="300" height="14" fill="#dcc093" stroke="#a48246" stroke-width="1.5" rx="3"/>
+              <circle cx="260" cy="183" r="20" fill="#c83040" stroke="#761018" stroke-width="1.4"/>
+              <!-- friction arrow: up the slope (-x in plate frame) from ball centre -->
+              <line x1="260" y1="183" x2="205" y2="183" stroke="#6643a0" stroke-width="2.6" marker-end="url(#violet-ar)"/>
+              <!-- normal force: perpendicular to plate, away from surface -->
+              <line x1="260" y1="183" x2="260" y2="105" stroke="#003262" stroke-width="2.6" marker-end="url(#blue-ar2)"/>
+            </g>
+            <!-- labels outside the rotated group so they sit upright in the image. -->
+            <text x="184" y="244" text-anchor="end" fill="#6643a0" font-size="15" font-family="Fraunces" font-weight="700" font-style="italic">f</text>
+            <text x="190" y="258" text-anchor="end" fill="#6643a0" font-size="10" font-family="Fraunces" font-style="italic">friction</text>
+            <text x="288" y="124" fill="#003262" font-size="15" font-family="Fraunces" font-weight="700" font-style="italic">N</text>
+            <text x="288" y="138" fill="#003262" font-size="10" font-family="Fraunces" font-style="italic">normal</text>
+            <!-- gravity (always vertical, originating from the ball centre).
+                 The ball centre is at (260, 183) inside the rotated group;
+                 rotating by -18° about (230, 200) maps it to ≈ (253, 175) in world. -->
+            <line x1="253" y1="175" x2="253" y2="275" stroke="#288c5a" stroke-width="2.6" marker-end="url(#green-ar2)"/>
+            <text x="261" y="255" fill="#288c5a" font-size="15" font-family="Fraunces" font-weight="700" font-style="italic">mg</text>
+            <text x="261" y="269" fill="#288c5a" font-size="10" font-family="Fraunces" font-style="italic">gravity</text>
+            <!-- defs -->
+            <defs>
+              <marker id="violet-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6643a0"/>
+              </marker>
+              <marker id="blue-ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+              </marker>
+              <marker id="green-ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#288c5a"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== Step 4: Newton on translation ============== -->
+  <section class="story-section alt">
+    <div class="container container-narrow reveal">
+      <p class="eyebrow">04 — Translation along the slope</p>
+      <h2>Translation equation</h2>
+      <p style="color:var(--text-soft);font-size:1.05rem;max-width:620px;">
+        Projecting Newton's second law along $\hat x_P$, the gravity component along the
+        slope is $m g \sin\theta_y$; the normal force is perpendicular to $\hat x_P$ and
+        does not contribute.
+      </p>
+      <div class="math-block">
+        <span class="label">along $\hat x_P$</span>
+        $$m\, \ddot x \;=\; m\, g\, \sin\theta_y \;-\; f$$
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== Step 5: Newton on rotation ============== -->
+  <section class="story-section">
+    <div class="container container-narrow reveal">
+      <p class="eyebrow">05 — Torque about the ball's centre</p>
+      <h2>Rotational equation</h2>
+      <p style="color:var(--text-soft);font-size:1.05rem;max-width:620px;">
+        Friction acts at the contact point at distance $\rho$ from the ball's centre,
+        producing a torque $f\rho$ about the centre. Gravity acts through the centre and
+        the normal force is perpendicular to the moment arm, so neither contributes.
+      </p>
+      <div class="math-block">
+        <span class="label">torque about ball centre</span>
+        $$I\, \alpha \;=\; f \cdot \rho$$
+      </div>
+      <p style="color:var(--text-soft);font-size:0.95rem;">
+        For a uniform solid sphere:
+      </p>
+      <div class="math-block">
+        <span class="label">moment of inertia</span>
+        $$I \;=\; \tfrac{2}{5}\, m\, \rho^{2}$$
+      </div>
+      <p style="color:var(--text-soft);font-size:0.95rem;">
+        Here $\alpha$ is the angular acceleration of the ball about its centre.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== Step 6: Rolling constraint ============== -->
+  <section class="story-section alt">
+    <div class="container">
+      <div class="story-grid flip">
+        <div class="story-text reveal-r">
+          <p class="eyebrow">06 — Rolling-without-slipping constraint</p>
+          <h2>Kinematic constraint</h2>
+          <p class="lead">
+            The rolling-without-slipping condition requires that the contact point has zero
+            velocity relative to the plate at the instant of contact, which is equivalent to:
+          </p>
+          <div class="math-block" style="background:none;border:none;padding:0;box-shadow:none;border-left:none;">
+            $$v \;=\; \rho\, \omega \quad\Longrightarrow\quad \ddot x \;=\; \rho\, \alpha$$
+          </div>
+          <p style="color:var(--text-soft);font-size:0.95rem;">
+            Translational speed equals radius times angular rate. Differentiating once:
+            translational acceleration equals radius times angular acceleration.
+          </p>
+        </div>
+        <div class="reveal-l">
+          <svg class="diagram" viewBox="0 0 460 280">
+            <line x1="40" y1="220" x2="420" y2="220" stroke="#dcc093" stroke-width="6"/>
+            <!-- ball -->
+            <circle cx="170" cy="190" r="30" fill="#c83040" stroke="#761018" stroke-width="2"/>
+            <line x1="170" y1="190" x2="170" y2="220" stroke="#fff" stroke-width="2"/>
+            <line x1="170" y1="190" x2="195" y2="207" stroke="#fff" stroke-width="2"/>
+            <!-- arrow showing angular velocity (curved arrow) -->
+            <path d="M 170 158 A 32 32 0 0 1 202 190" fill="none" stroke="#6643a0" stroke-width="2.5" marker-end="url(#violet-ar2)"/>
+            <text x="206" y="170" fill="#6643a0" font-size="14" font-family="Fraunces" font-style="italic">ω</text>
+            <!-- velocity arrow at center -->
+            <line x1="170" y1="190" x2="240" y2="190" stroke="#003262" stroke-width="3" marker-end="url(#blue-ar3)"/>
+            <text x="246" y="186" fill="#003262" font-size="14" font-family="Fraunces" font-style="italic">v = ρω</text>
+            <!-- radius indicator -->
+            <line x1="170" y1="190" x2="170" y2="220" stroke="#888" stroke-width="1" stroke-dasharray="3 3"/>
+            <text x="180" y="210" fill="#888" font-size="11" font-style="italic">ρ</text>
+            <!-- contact point label -->
+            <circle cx="170" cy="220" r="4" fill="#288c5a"/>
+            <text x="124" y="245" fill="#288c5a" font-size="11" font-style="italic">contact (zero rel. vel.)</text>
+            <defs>
+              <marker id="violet-ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6643a0"/>
+              </marker>
+              <marker id="blue-ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== Step 7: combine ============== -->
+  <section class="story-section">
+    <div class="container container-narrow reveal">
+      <p class="eyebrow">07 — Eliminate $f$ and $\alpha$</p>
+      <h2>Eliminate $f$ and $\alpha$</h2>
+      <p style="color:var(--text-soft);font-size:1.05rem;">
+        Three equations are available: Newton's second law along $\hat x_P$, the torque
+        equation about the ball's centre, and the rolling constraint. Substituting
+        $\alpha = \ddot x / \rho$ into the torque equation removes $\alpha$; substituting
+        the resulting expression for $f$ into Newton's second law removes $f$, leaving a
+        single equation in $\ddot x$.
+      </p>
+
+      <div class="math-block">
+        <span class="label">substitute $\alpha = \ddot x / \rho$</span>
+        $$I \cdot \frac{\ddot x}{\rho} \;=\; f \cdot \rho \;\;\Longrightarrow\;\; f \;=\; \frac{I}{\rho^{2}}\,\ddot x \;=\; \tfrac{2}{5}\, m\, \ddot x$$
+      </div>
+
+      <div class="math-block">
+        <span class="label">plug into translation</span>
+        $$m\, \ddot x \;=\; m\, g\, \sin\theta_y \;-\; \tfrac{2}{5}\, m\, \ddot x$$
+      </div>
+
+      <div class="math-block">
+        <span class="label">collect $\ddot x$</span>
+        $$\bigl(1 + \tfrac{2}{5}\bigr)\, m\, \ddot x \;=\; m\, g\, \sin\theta_y \;\;\Longrightarrow\;\; \tfrac{7}{5}\, m\, \ddot x \;=\; m\, g\, \sin\theta_y$$
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== Step 8: result ============== -->
+  <section class="story-section alt">
+    <div class="container container-narrow" style="text-align:center;">
+      <div class="reveal">
+        <p class="eyebrow">08 — Result</p>
+        <h2 style="margin-bottom:1rem;">Rolling equation</h2>
+      </div>
+      <div class="result-box reveal-scale">
+        <span class="label">exact</span>
+        $$\ddot x \;=\; \tfrac{5}{7}\, g\, \sin\theta_y$$
+      </div>
+      <p class="reveal" style="color:var(--text-soft);font-size:1rem;max-width:600px;margin:0 auto;">
+        For small tilts, $\sin\theta_y \approx \theta_y$, so:
+      </p>
+      <div class="result-box reveal-scale" style="background:linear-gradient(135deg, #c4820e, #fdb515);">
+        <span class="label">small-angle, used in the controller</span>
+        $$\ddot x \;\approx\; \tfrac{5}{7}\, g\, \theta_y$$
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 09: extension to the other axis ============== -->
+  <section class="story-section">
+    <div class="container container-narrow reveal">
+      <p class="eyebrow">09 — Extension to the other axis</p>
+      <h2>The $\hat y_P$ equation</h2>
+      <p style="color:var(--text-soft);font-size:1.05rem;max-width:620px;">
+        The derivation above was carried out along $\hat x_P$, using a tilt
+        $\theta_y$ about $\hat y_W$. The argument is symmetric: along $\hat y_P$
+        the slope is produced by a tilt $\theta_x$ about $\hat x_W$, and an
+        identical chain of Newton, torque and rolling-constraint equations
+        yields the same factor $\tfrac{5}{7}$ with a single sign change driven
+        by the wiring convention.
+      </p>
+      <div class="math-block">
+        <span class="label">exact, both axes</span>
+        $$\ddot x \;=\; \phantom{-}\tfrac{5}{7}\, g\, \sin\theta_y, \qquad
+          \ddot y \;=\; -\tfrac{5}{7}\, g\, \sin\theta_x$$
+      </div>
+      <p style="color:var(--text-soft);font-size:1rem;max-width:620px;">
+        Under the small-angle approximation $\sin\theta \approx \theta$, the
+        controller uses:
+      </p>
+      <div class="math-block">
+        <span class="label">small-angle, both axes</span>
+        $$\ddot x \;\approx\; \phantom{-}\tfrac{5}{7}\, g\, \theta_y, \qquad
+          \ddot y \;\approx\; -\tfrac{5}{7}\, g\, \theta_x$$
+      </div>
+      <p style="color:var(--text-soft);font-size:0.95rem;max-width:620px;margin-top:0.8rem;">
+        The minus sign in the $\hat y_P$ equation comes from the wiring
+        convention $\theta_{\text{tar}} = u_y\, \hat x_P^{\,W}(q) - u_x\, \hat y_P^{\,W}(q)$
+        fixed on the <a href="control.html">control page</a>: a positive tilt
+        about the world's $\hat x_W$ axis accelerates the ball in the $-\hat y_P$
+        direction.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== Step 9: effective inertia ============== -->
+  <section class="story-section">
+    <div class="container container-narrow reveal">
+      <p class="eyebrow">10 — Interpretation of $\tfrac{5}{7}$</p>
+      <h2>Effective inertia</h2>
+      <p style="color:var(--text-soft);font-size:1.05rem;">
+        The factor $\tfrac{5}{7}$ is the ratio $1 / \!\bigl(1 + I / (m\rho^{2})\bigr)$;
+        with $I = \tfrac{2}{5}m\rho^{2}$ for a uniform solid sphere, this is $\tfrac{5}{7}$.
+        Equivalently, $\tfrac{5}{7}$ of the gravitational power along the slope drives
+        translation and $\tfrac{2}{7}$ drives rotation.
+      </p>
+      <div class="math-block">
+        $$\frac{1}{1 + I / (m\rho^{2})} \;=\; \frac{1}{1 + 2/5} \;=\; \frac{5}{7}$$
+      </div>
+
+      <div class="compare">
+        <div class="col pid">
+          <h4>Sliding (no rotation)</h4>
+          <div class="val">$\ddot x = g\,\sin\theta$</div>
+          <div class="lab">all gravity goes to translation</div>
+        </div>
+        <div class="col res">
+          <h4>Rolling sphere</h4>
+          <div class="val">$\ddot x = \tfrac{5}{7}\, g\,\sin\theta$</div>
+          <div class="lab">$\tfrac{5}{7}$ translation · $\tfrac{2}{7}$ rotation</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============== Step 10: connection back to control ============== -->
+  <section class="story-section alt">
+    <div class="container container-narrow reveal">
+      <p class="eyebrow">11 — Connection to the wiring stage</p>
+      <h2>Sign convention used in the wiring stage</h2>
+      <p style="color:var(--text-soft);font-size:1.05rem;">
+        The result $\ddot x \propto +\theta_y$ fixes the sign of the tilt command relative
+        to the desired ball acceleration: a ball with positive $x$-error must be driven
+        toward $-\hat x$, so the corresponding tilt must satisfy $\theta_y < 0$, i.e.\ a
+        rotation about $-\hat y_W$. This is the sign that appears in the wiring formula
+        on the Control page:
+      </p>
+      <div class="math-block">
+        $$\theta_{\text{tar}} \;=\; u_y\, \hat x_P^{\,W}(q) \;-\; u_x\, \hat y_P^{\,W}(q)$$
+      </div>
+      <a href="control.html" class="btn btn-ghost" style="margin-top:1rem;">
+        Control pipeline <span class="arrow">→</span>
+      </a>
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h">References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Murray, R. M., Li, Z., Sastry, S. S.</span> (1994).
+          <span class="bib-title">A Mathematical Introduction to Robotic Manipulation</span>.
+          <span class="bib-venue">CRC Press</span>.
+          <a class="bib-link" href="https://www.cds.caltech.edu/~murray/mlswiki" target="_blank" rel="noopener">cds.caltech.edu/~murray/mlswiki</a>
+        </li>
+        <li>
+          <span class="bib-authors">Goldstein, H., Poole, C. P., Safko, J. L.</span> (2002).
+          <span class="bib-title">Classical Mechanics</span> (3rd ed.).
+          <span class="bib-venue">Addison-Wesley</span>.
+        </li>
+        <li>
+          <span class="bib-authors">Hauser, J., Sastry, S., Kokotović, P.</span> (1992).
+          <span class="bib-title">Nonlinear control via approximate input-output linearization: the ball and beam example</span>.
+          <span class="bib-venue">IEEE Transactions on Automatic Control, 37(3), 392–398</span>.
+          <a class="bib-link" href="https://people.eecs.berkeley.edu/~sastry/pubs/OldSastryALL/HauserBallandBeam1992.pdf" target="_blank" rel="noopener">eecs.berkeley.edu/~sastry</a>
+        </li>
+        <li>
+          <span class="bib-authors">Bloch, A. M.</span> (2015).
+          <span class="bib-title">Nonholonomic Mechanics and Control</span> (2nd ed.).
+          <span class="bib-venue">Springer, Interdisciplinary Applied Mathematics, vol. 24</span>.
+          <a class="bib-link" href="https://link.springer.com/book/10.1007/978-1-4939-3017-3" target="_blank" rel="noopener">link.springer.com/book/10.1007/978-1-4939-3017-3</a>
+        </li>
+        <li>
+          <span class="bib-authors">Knuplež, A., Chowdhury, A., Svečko, R.</span> (2003).
+          <span class="bib-title">Modeling and control design for the ball and plate system</span>.
+          <span class="bib-venue">Proc. IEEE Int. Conf. Industrial Technology (ICIT), pp. 1064–1067</span>.
+          <a class="bib-link" href="https://ieeexplore.ieee.org/document/1290810/" target="_blank" rel="noopener">ieeexplore.ieee.org/document/1290810</a>
+        </li>
+        <li>
+          <span class="bib-authors">Spong, M. W., Hutchinson, S., Vidyasagar, M.</span> (2020).
+          <span class="bib-title">Robot Modeling and Control</span> (2nd ed.).
+          <span class="bib-venue">Wiley</span>.
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

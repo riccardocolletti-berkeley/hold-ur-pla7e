@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sim2Real · Hold UR Pla7e</title>
+  <meta name="description" content="Sim-to-real transfer for the ball-on-plate testbed: simulator calibration, what domain randomisation covers, and what is observed on the real arm." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero s2r-hero">
+    <video class="s2r-hero-bg" autoplay muted loop playsinline preload="metadata"
+           poster="../assets/images/arm_hero.webm">
+      <source src="../assets/videos/circle_full.mp4" type="video/mp4" />
+    </video>
+    <div class="s2r-hero-overlay"></div>
+    <div class="container">
+      <p class="eyebrow">Real hardware</p>
+      <h1>Sim2Real</h1>
+      <p class="lead">
+        The controllers deployed on the live UR7e arm. For every reference
+        trajectory the live overhead camera is paired with the RViz mirror of
+        the same instant: a real-world view of the plate and the ball,
+        alongside the joint state and the commanded plate frame reconstructed
+        from the transform tree.
+      </p>
+    </div>
+  </header>
+
+  <section class="doc-section">
+    <div class="container">
+      <div class="shapes-gallery">
+        <a class="shape-card" href="#sec-circle">
+          <svg class="shape-svg" viewBox="0 0 140 140">
+            <rect x="8" y="8" width="124" height="124" rx="6" fill="#fef9ed" stroke="#a48246" stroke-width="1.5"/>
+            <rect x="14" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="14" y="112" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="112" width="14" height="14" fill="#0a1929"/>
+            <circle cx="70" cy="70" r="36" fill="none" stroke="#c4820e" stroke-width="2.4"/>
+            <circle cx="106" cy="70" r="5" fill="#c83040" stroke="#761018" stroke-width="1"/>
+          </svg>
+          <div class="shape-label">Circle</div>
+        </a>
+
+        <a class="shape-card" href="#sec-figure8">
+          <svg class="shape-svg" viewBox="0 0 140 140">
+            <rect x="8" y="8" width="124" height="124" rx="6" fill="#fef9ed" stroke="#a48246" stroke-width="1.5"/>
+            <rect x="14" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="14" y="112" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="112" width="14" height="14" fill="#0a1929"/>
+            <path d="M 70 70 C 50 40 30 40 30 70 C 30 100 50 100 70 70 C 90 40 110 40 110 70 C 110 100 90 100 70 70 Z" fill="none" stroke="#c4820e" stroke-width="2.4"/>
+            <circle cx="46" cy="56" r="5" fill="#c83040" stroke="#761018" stroke-width="1"/>
+          </svg>
+          <div class="shape-label">Figure-of-eight</div>
+        </a>
+
+        <a class="shape-card" href="#sec-square">
+          <svg class="shape-svg" viewBox="0 0 140 140">
+            <rect x="8" y="8" width="124" height="124" rx="6" fill="#fef9ed" stroke="#a48246" stroke-width="1.5"/>
+            <rect x="14" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="14" y="112" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="112" width="14" height="14" fill="#0a1929"/>
+            <rect x="38" y="38" width="64" height="64" fill="none" stroke="#c4820e" stroke-width="2.4"/>
+            <circle cx="102" cy="56" r="5" fill="#c83040" stroke="#761018" stroke-width="1"/>
+          </svg>
+          <div class="shape-label">Square</div>
+        </a>
+
+        <a class="shape-card" href="#sec-drawn">
+          <svg class="shape-svg" viewBox="0 0 140 140">
+            <rect x="8" y="8" width="124" height="124" rx="6" fill="#fef9ed" stroke="#a48246" stroke-width="1.5"/>
+            <rect x="14" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="14" width="14" height="14" fill="#0a1929"/>
+            <rect x="14" y="112" width="14" height="14" fill="#0a1929"/>
+            <rect x="112" y="112" width="14" height="14" fill="#0a1929"/>
+            <path d="M 70 32 L 79.4 57.1 L 106.2 58.3 L 85.2 74.9 L 92.3 100.7 L 70 86 L 47.7 100.7 L 54.8 74.9 L 33.8 58.3 L 60.6 57.1 Z" fill="none" stroke="#c4820e" stroke-width="2.4" stroke-linejoin="round"/>
+            <circle cx="70" cy="32" r="5" fill="#c83040" stroke="#761018" stroke-width="1"/>
+          </svg>
+          <div class="shape-label">User-drawn</div>
+        </a>
+      </div>
+      <p class="shapes-gallery-caption">The four reference shapes tracked on the live arm. Each panel shows the plate frame, the ArUco corners, the reference trace, and the ball.</p>
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose" id="sec-circle">
+
+      <h3 class="section-h"><span class="section-num">§ 1</span>Tracking a circle</h3>
+      <p>
+        The reference is a 10 cm-radius circle traversed at a fixed period.
+        The live overhead camera frames the plate and the ball; the RViz
+        visualiser reconstructs the joint state, the commanded plate frame,
+        and the reference path that the controller is chasing.
+      </p>
+
+      <div class="s2r-split">
+        <figure class="s2r-half">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/circle_robot.mp4" type="video/mp4" />
+          </video>
+          <figcaption><span class="s2r-tag s2r-tag-real">live camera</span></figcaption>
+        </figure>
+        <figure class="s2r-half">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/circle_rviz.mp4" type="video/mp4" />
+          </video>
+          <figcaption><span class="s2r-tag s2r-tag-rviz">RViz mirror</span></figcaption>
+        </figure>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose" id="sec-figure8">
+
+      <h3 class="section-h"><span class="section-num">§ 2</span>Tracking a figure-of-eight</h3>
+      <p>
+        A Lissajous figure-of-eight: the trajectory crosses itself at the
+        centre, so the ball passes through the same point twice per loop in
+        opposite directions.
+      </p>
+
+      <div class="s2r-split">
+        <figure class="s2r-half">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/figure8_robot.mp4" type="video/mp4" />
+          </video>
+          <figcaption><span class="s2r-tag s2r-tag-real">live camera</span></figcaption>
+        </figure>
+        <figure class="s2r-half">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/figure8_rviz.mp4" type="video/mp4" />
+          </video>
+          <figcaption><span class="s2r-tag s2r-tag-rviz">RViz mirror</span></figcaption>
+        </figure>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose" id="sec-square">
+
+      <h3 class="section-h"><span class="section-num">§ 3</span>Tracking a square</h3>
+      <p>
+        A square reference: four straight edges joined by sharp corners.
+      </p>
+
+      <div class="s2r-split">
+        <figure class="s2r-half">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/hand_drawn_square_robot.mp4" type="video/mp4" />
+          </video>
+          <figcaption><span class="s2r-tag s2r-tag-real">live camera</span></figcaption>
+        </figure>
+        <figure class="s2r-half">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/hand_drawn_square_rviz.mp4" type="video/mp4" />
+          </video>
+          <figcaption><span class="s2r-tag s2r-tag-rviz">RViz mirror</span></figcaption>
+        </figure>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose" id="sec-drawn">
+
+      <h3 class="section-h"><span class="section-num">§ 4</span>User-drawn reference</h3>
+      <p>
+        The designer tool lets an operator sketch an arbitrary closed shape
+        on a tablet; the sketch is resampled to a smooth reference trajectory
+        and uploaded to the controller, which then drives the arm along it.
+      </p>
+
+      <div class="s2r-pair">
+        <figure class="s2r-pair-card">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/drawing_shape.mp4" type="video/mp4" />
+          </video>
+          <figcaption>
+            <span class="s2r-tag s2r-tag-design">designer tool</span>
+          </figcaption>
+        </figure>
+        <figure class="s2r-pair-card">
+          <video class="s2r-video" autoplay muted loop playsinline preload="metadata">
+            <source src="../assets/videos/executing_drawn_shape.mp4" type="video/mp4" />
+          </video>
+          <figcaption>
+            <span class="s2r-tag s2r-tag-real">live execution</span>
+          </figcaption>
+        </figure>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="doc-section">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 5</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Tobin, J., Fong, R., Ray, A., Schneider, J., Zaremba, W., Abbeel, P.</span> (2017).
+          <span class="bib-title">Domain randomization for transferring deep neural networks from simulation to the real world</span>.
+          <span class="bib-venue">IEEE/RSJ IROS, pp. 23–30</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1703.06907" target="_blank" rel="noopener">arxiv.org/abs/1703.06907</a>
+        </li>
+        <li>
+          <span class="bib-authors">Peng, X. B., Andrychowicz, M., Zaremba, W., Abbeel, P.</span> (2018).
+          <span class="bib-title">Sim-to-real transfer of robotic control with dynamics randomization</span>.
+          <span class="bib-venue">IEEE ICRA, pp. 3803–3810</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/1710.06537" target="_blank" rel="noopener">arxiv.org/abs/1710.06537</a>
+        </li>
+        <li>
+          <span class="bib-authors">Zhao, W., Queralta, J. P., Westerlund, T.</span> (2020).
+          <span class="bib-title">Sim-to-real transfer in deep reinforcement learning for robotics: a survey</span>.
+          <span class="bib-venue">IEEE SSCI, pp. 737–744</span>.
+          <a class="bib-link" href="https://arxiv.org/abs/2009.13303" target="_blank" rel="noopener">arxiv.org/abs/2009.13303</a>
+        </li>
+        <li>
+          <span class="bib-authors">Höfer, S., Bekris, K., Handa, A., Gamboa, J. C., Mozifian, M., Golemo, F., Atkeson, C., Fox, D., Goldberg, K., Levine, S., Tedrake, R., et al.</span> (2021).
+          <span class="bib-title">Sim2real in robotics and automation: applications and challenges</span>.
+          <span class="bib-venue">IEEE Transactions on Automation Science and Engineering, 18(2), 398–400</span>.
+          <a class="bib-link" href="https://doi.org/10.1109/TASE.2021.3064065" target="_blank" rel="noopener">doi.org/10.1109/TASE.2021.3064065</a>
+        </li>
+        <li>
+          <span class="bib-authors">Todorov, E., Erez, T., Tassa, Y.</span> (2012).
+          <span class="bib-title">MuJoCo: a physics engine for model-based control</span>.
+          <span class="bib-venue">IEEE/RSJ IROS, pp. 5026–5033</span>.
+          <a class="bib-link" href="https://doi.org/10.1109/IROS.2012.6386109" target="_blank" rel="noopener">doi.org/10.1109/IROS.2012.6386109</a>
+        </li>
+        <li>
+          <span class="bib-authors">Coumans, E., Bai, Y.</span> (2016–2021).
+          <span class="bib-title">PyBullet, a Python module for physics simulation for games, robotics and machine learning</span>.
+          <span class="bib-venue">Software</span>.
+          <a class="bib-link" href="http://pybullet.org" target="_blank" rel="noopener">pybullet.org</a>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

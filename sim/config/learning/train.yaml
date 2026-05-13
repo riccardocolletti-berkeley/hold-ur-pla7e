@@ -1,0 +1,50 @@
+# PPO training config. Loaded by sim.learning.train.
+
+algo: ppo
+n_envs: 16                  # parallel sims
+total_timesteps: 30000000   # ~2h30 on M3 (16 envs, ~3000 fps)
+save_every_steps: 200000    # checkpoint cadence
+
+policy_kwargs:
+  net_arch: [256, 256]      # extra capacity helps the tracking objective
+  activation_fn: tanh
+
+ppo:
+  learning_rate: 1.0e-4     # overridden by `schedule.lr_*` below when set
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.1
+  ent_coef: 0.001           # tuned-zoo range: 4e-4 to 1e-3
+  vf_coef: 0.6
+  max_grad_norm: 0.5
+
+env:
+  episode_steps: 600         # 20 s at 30 Hz, matching the camera/control loop
+  policy_hz: 30              # real controller command rate
+  action_scale: 0.3          # residual: max correction added on top of the PID baseline
+  lookahead_s: 0.2           # observed target horizon in the obs vector
+  omega_clip_rad_s: 1.0      # real controller norm clip
+  max_tilt_rad: 0.060        # real per-joint correction limit
+  command_alpha: 0.70        # real joint-command smoothing
+  actuator_tau_s: 0.15       # real trajectory command time constant
+  velocity_clip_mps: 0.120   # real tracker/controller velocity clip
+
+# Linear schedules over `total_timesteps`. Conservative end values: PPO is
+# documented as sensitive to over-exploration late in training.
+schedule:
+  ent_coef_start: 0.005
+  ent_coef_end:   0.0005
+  lr_start:       1.0e-4
+  lr_end:         1.0e-5
+
+curriculum:
+  # Slow transitions prevent PPO from forgetting balance when harder tracking
+  # references enter the mix.
+  stages:
+    - { until_steps:  1000000, shapes: [stationary] }
+    - { until_steps:  5000000, shapes: [stationary, slow_circle] }
+    - { until_steps: 12000000, shapes: [stationary, slow_circle, circle] }
+    - { until_steps: 999999999, shapes: [stationary, circle, figure8] }

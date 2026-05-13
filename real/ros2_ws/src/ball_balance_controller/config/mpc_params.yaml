@@ -1,0 +1,94 @@
+# =============================================================================
+# Parameters for the ball-balance MPC ROS 2 controller node and the
+# visualizer that runs alongside it.
+#
+# The reference trajectory lives in config/reference.yaml (shared with the
+# PID node and the tracker). The launch file loads both files, so editing
+# the trajectory means touching reference.yaml only.
+#
+# The MPC plans an LQR-style cost over `horizon` discrete steps of length
+# `dt`, decoupled per axis. The closed-form unconstrained QP is solved via
+# pre-factored gain matrices, so each tick costs ~10 microseconds.
+# =============================================================================
+
+ball_balance_mpc:
+  ros__parameters:
+
+    # ── URDF + base pose ──────────────────────────────────────────────────────
+    # urdf_path is supplied by the launch file (defaults to the bundled UR7e
+    # URDF). Setting it here is unsafe: the specific-node block takes
+    # precedence over the launch override (which lands in the /** namespace),
+    # and an empty string would silently win.
+    home_joints: [0.5, -2.35, 2.65, -1.85, 1.57, 0.0]
+
+    world_frame: "base_link"
+    plate_frame: "plate_center"
+
+    # ── MPC tuning ────────────────────────────────────────────────────────────
+    # Per-axis cost (x and y decouple under the linearised plant):
+    #
+    #   sum_{k=1..N-1} q_pos·(x_k - x_ref_k)² + q_vel·(v_k - v_ref_k)²
+    #                + r_u·u_{k-1}²
+    #   + qf_pos·(x_N - x_ref_N)² + qf_vel·(v_N - v_ref_N)²
+    #
+    # Rules of thumb:
+    #   * q_pos chases the position reference harder; saturates max_tilt_rad
+    #     more often as it grows.
+    #   * q_vel damps oscillation; raise it if you see overshoot.
+    #   * r_u keeps the controller from acting on noise.
+    #   * qf_* are the terminal weights; keep them ~5x stage weights so
+    #     the finite horizon emulates infinite-horizon LQR.
+    horizon:  25
+    dt:       0.01667     # 1/60, matches the camera frame period
+    # Gains halved twice after the first real-arm bring-up: the original
+    # (q_pos=150, qf_pos=750) saturated every tick. q_vel raised relative
+    # to q_pos for damping; the first run showed delay-induced oscillation
+    # once the ball reached the linear regime.
+    q_pos:    25.0
+    q_vel:    20.0
+    r_u:      1.0
+    qf_pos:   125.0
+    qf_vel:  100.0
+
+    # ── Safety / shaping ──────────────────────────────────────────────────────
+    # Tightened from 0.15 to 0.10 because at 0.15 the arm couldn't track
+    # commands inside the trajectory_time_s budget: drift hit 0.187 rad
+    # (UR's 0.2 rad state tolerance), and the resulting command-tracking
+    # lag drove delay-induced ball oscillation.
+    max_tilt_rad:        0.100     # plate tilt cap per axis (~5.7°)
+    max_joint_delta_rad: 0.100     # per-joint offset cap from home
+    max_dt_s:            0.050
+
+    # ── Timing and filtering ──────────────────────────────────────────────────
+    # 200 Hz matches the PID node's verified ceiling: above ~200 Hz the UR
+    # scaled trajectory controller's 0.2 rad state tolerance starts to bite
+    # (the joint cannot catch up under its velocity limit).
+    command_rate_hz:     200.0
+    command_alpha:         0.99    # near-passthrough on the Δq low-pass
+    # Raised from 0.05 to 0.08: gives the joint more time to reach each
+    # commanded step before the next one arrives. With 0.10 rad max delta
+    # over 0.08 s the demanded velocity is 1.25 rad/s, well under the UR
+    # e-series ~3 rad/s limit, leaving headroom for tracking.
+    trajectory_time_s:     0.080   # blended ramp horizon for the scaled controller
+    startup_home_time_s:   1.00
+    return_to_base_rate:   0.02    # at 500 Hz ≈ 100 ms time constant
+
+    # ── Tracker freshness limits ──────────────────────────────────────────────
+    stale_ball_state_s:   5.00
+    missing_ball_grace_s: 5.00
+
+    markers_min_visible: 2
+
+    # ── Joint locking ─────────────────────────────────────────────────────────
+    # Spec parsed by ballplate.control.parse_lock_spec:
+    #   "config" : read indices from config/control.yaml (shared with sim)
+    #   "none"   : no joints locked
+    #   "all"    : every joint pinned at home
+    #   "0,1,2"  : comma-separated indices
+    locked_joints_spec: "config"
+
+ball_balance_visualizer:
+  ros__parameters:
+    reference_overlay_samples: 240
+    publish_rate_hz:            10.0
+    ball_trail_seconds:          4.0

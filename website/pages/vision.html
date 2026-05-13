@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vision · Hold UR Pla7e</title>
+  <meta name="description" content="Vision pipeline: overhead camera, ArUco-based plate frame, and tilt-aware Kalman filter that fuses pixel detections into a smooth ball state estimate." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Perception</p>
+      <h1>Vision</h1>
+      <p class="lead">Geometric and statistical recovery of the planar ball state $X = (x, y, \dot x, \dot y) \in \mathbb{R}^4$ from an overhead RGB stream: ArUco-based homography from the image plane onto the plate, colour-segmentation of the ball, and a constant-velocity Kalman filter that fuses the noisy position measurements with the dynamic model to produce a smooth estimate of position and velocity at the controller rate.</p>
+    </div>
+  </header>
+
+  <section class="container container-narrow body-prose">
+
+    <h3 class="section-h"><span class="section-num">§ 1</span>Coordinate frames</h3>
+    <p>
+      Three frames are involved: the image plane in pixels, the camera frame in metres
+      centred at the optical centre, and the plate frame on the plate surface. Every
+      stage that follows is a transformation between two of these.
+    </p>
+
+    <div class="frames-layout">
+      <div class="frames-cards">
+
+        <div class="frame-card frame-image">
+          <div class="frame-icon">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="8" width="28" height="22" rx="1"/>
+              <path d="M6 14 L34 14"/>
+              <path d="M12 14 L12 30"/>
+              <path d="M10 18 L14 18"/>
+              <path d="M10 22 L14 22"/>
+              <path d="M16 18 L20 18"/>
+              <circle cx="25" cy="22" r="3" fill="currentColor" stroke="none"/>
+            </svg>
+          </div>
+          <div class="frame-body">
+            <span class="frame-tag">image &middot; pixels</span>
+            <h4>Image plane</h4>
+            <p>
+              Pixel coordinates $(u, v) \in \mathbb{N}^2$ with origin at the top-left
+              corner of the image. Everything the camera sees lives here first.
+            </p>
+          </div>
+        </div>
+
+        <div class="frame-card frame-camera">
+          <div class="frame-icon">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="14" width="22" height="14" rx="1.6"/>
+              <path d="M11 14 L13 10 L21 10 L23 14"/>
+              <circle cx="17" cy="21" r="4"/>
+              <circle cx="17" cy="21" r="1.5" fill="currentColor" stroke="none"/>
+              <path d="M28 21 L36 18"/>
+              <path d="M33 16 L36 18 L34 21"/>
+            </svg>
+          </div>
+          <div class="frame-body">
+            <span class="frame-tag">$\{C\}$ &middot; metres</span>
+            <h4>Camera frame</h4>
+            <p>
+              Centred at the optical centre of the pinhole model. $\hat z_C$ runs
+              along the optical axis (positive in front of the camera);
+              $(\hat x_C, \hat y_C)$ align with the image axes.
+            </p>
+          </div>
+        </div>
+
+        <div class="frame-card frame-plate">
+          <div class="frame-icon">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 26 L20 18 L36 26 L20 34 Z"/>
+              <circle cx="20" cy="26" r="1.4" fill="currentColor" stroke="none"/>
+              <path d="M20 26 L32 21"/>
+              <path d="M28.5 19 L32 21 L29.5 24"/>
+              <path d="M20 26 L20 12"/>
+              <path d="M17 15 L20 12 L23 15"/>
+            </svg>
+          </div>
+          <div class="frame-body">
+            <span class="frame-tag">$\{P\}$ &middot; metres</span>
+            <h4>Plate frame</h4>
+            <p>
+              Defined on the <a href="setup.html">setup page</a>: origin at the
+              plate centre, $\hat x_P$ to the right in the overhead view,
+              $\hat y_P$ up, $\hat z_P$ along the plate normal.
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <figure class="fig fig-arm">
+        <svg class="diagram" viewBox="0 0 320 320" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="vAx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+            </marker>
+            <marker id="vAxG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f7d3e"/>
+            </marker>
+            <marker id="vRay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#b41e28"/>
+            </marker>
+          </defs>
+
+          <!-- ground / table surface -->
+          <line x1="20" y1="280" x2="300" y2="280" stroke="#bbb" stroke-width="1.3" stroke-dasharray="5 4"/>
+
+          <!-- Plate seen in perspective as a parallelogram. The four ArUco markers are
+               drawn as polygons that share the SAME affine perspective as the plate, so
+               they are foreshortened consistently. Corners were computed from a unit
+               square in plate-frame mapped through M = [160 −10 ; 40 30] + (60, 250):
+                   (u, v) ↦ (160u + 40v + 60, −10u + 30v + 250). -->
+          <g>
+            <path d="M 60 250 L 220 240 L 260 270 L 100 280 Z" fill="#dcc093" stroke="#a48246" stroke-width="1.5"/>
+            <g fill="#0a1929">
+              <!-- TL marker: (0.04,0.06)–(0.13,0.30) in plate-frame -->
+              <path d="M 68.8 251.4 L 83.2 250.5 L 92.8 257.7 L 78.4 258.6 Z"/>
+              <!-- TR marker: (0.78,0.06)–(0.87,0.30) -->
+              <path d="M 187.2 244 L 201.6 243.1 L 211.2 250.3 L 196.8 251.2 Z"/>
+              <!-- BL marker: (0.04,0.66)–(0.13,0.90) -->
+              <path d="M 92.8 269.4 L 107.2 268.5 L 116.8 275.7 L 102.4 276.6 Z"/>
+              <!-- BR marker: (0.78,0.66)–(0.87,0.90) -->
+              <path d="M 211.2 262 L 225.6 261.1 L 235.2 268.3 L 220.8 269.2 Z"/>
+            </g>
+            <!-- ball on plate at plate-frame (0.5, 0.5) = image (160, 260) -->
+            <circle cx="160" cy="260" r="5" fill="#c83040" stroke="#761018" stroke-width="1"/>
+          </g>
+
+          <!-- Plate frame {P}, drawn IN THE PLATE'S PERSPECTIVE so both axes lie
+               on the plate surface (not screen-aligned). Origin at the plate centre.
+               Axes computed from the same affine map M used for the plate and markers:
+                 x̂_P direction in image = ( 160, −10), normalised → arrow tip at (210, 257)
+                 ŷ_P direction in image = (−40, −30), normalised → arrow tip at (120, 230)
+               A vivid green is used so the axes stand out against the beige plate. -->
+          <line x1="160" y1="260" x2="210" y2="257" stroke="#0f7d3e" stroke-width="2.4" marker-end="url(#vAxG)"/>
+          <text x="216" y="258" fill="#0f7d3e" font-size="12" font-family="Fraunces" font-style="italic">x̂<tspan dy="3" font-size="9">P</tspan></text>
+          <line x1="160" y1="260" x2="120" y2="230" stroke="#0f7d3e" stroke-width="2.4" marker-end="url(#vAxG)"/>
+          <text x="112" y="227" text-anchor="end" fill="#0f7d3e" font-size="12" font-family="Fraunces" font-style="italic">ŷ<tspan dy="3" font-size="9">P</tspan></text>
+          <circle cx="160" cy="260" r="2.8" fill="#0f7d3e"/>
+          <text x="170" y="266" fill="#0f7d3e" font-size="11" font-family="Fraunces" font-style="italic">$\{P\}$</text>
+
+          <!-- camera body (overhead). Mount + connector are pushed well above the body
+               so the D435i label, the bracket and the body do not run into each other. -->
+          <g>
+            <rect x="120" y="40" width="80" height="34" rx="4" fill="#2a2a2e" stroke="#0a0a0e" stroke-width="1.2"/>
+            <circle cx="148" cy="57" r="6" fill="#0c1f3a" stroke="#3a3a3e" stroke-width="1"/>
+            <circle cx="172" cy="57" r="6" fill="#0c1f3a" stroke="#3a3a3e" stroke-width="1"/>
+            <circle cx="148" cy="57" r="2" fill="rgba(255,255,255,0.4)"/>
+            <!-- mount tab above the camera body -->
+            <rect x="155" y="28" width="10" height="10" fill="#444"/>
+            <line x1="160" y1="20" x2="160" y2="28" stroke="#666" stroke-width="2"/>
+          </g>
+
+          <!-- Camera frame {C} — origin at the bottom centre of the camera body.
+               Both basis vectors are drawn from the same origin with the same length.
+               x̂_C points right; ẑ_C points down along the optical axis. The ẑ_C arrow
+               is OFFSET slightly to the left of the projection ray (drawn separately
+               in red dashed below) so the two never overlap visually. -->
+          <line x1="160" y1="74" x2="205" y2="74" stroke="#003262" stroke-width="2.2" marker-end="url(#vAx)"/>
+          <text x="210" y="78" fill="#003262" font-size="12" font-family="Fraunces" font-style="italic">x̂<tspan dy="3" font-size="9">C</tspan></text>
+          <line x1="148" y1="80" x2="148" y2="115" stroke="#003262" stroke-width="2.2" marker-end="url(#vAx)"/>
+          <text x="140" y="103" text-anchor="end" fill="#003262" font-size="12" font-family="Fraunces" font-style="italic">ẑ<tspan dy="3" font-size="9">C</tspan></text>
+          <circle cx="160" cy="74" r="2.5" fill="#003262"/>
+          <text x="138" y="70" text-anchor="end" fill="#003262" font-size="11" font-family="Fraunces" font-style="italic">$\{C\}$</text>
+
+          <!-- Camera frustum: four thin dashed rays from the optical centre to the
+               corners of the image plane, making the pinhole geometry explicit. -->
+          <g stroke="#9aa6b3" stroke-width="0.9" stroke-dasharray="3 2.5" fill="none">
+            <line x1="160" y1="74" x2="120" y2="118"/>
+            <line x1="160" y1="74" x2="200" y2="118"/>
+            <line x1="160" y1="74" x2="120" y2="168"/>
+            <line x1="160" y1="74" x2="200" y2="168"/>
+          </g>
+
+          <!-- Image plane (just below the optical centre, parallel to the plate). -->
+          <g>
+            <rect x="120" y="118" width="80" height="50" fill="#fff" stroke="#666" stroke-width="1.2" opacity="0.95"/>
+            <g stroke="#ccc" stroke-width="0.6">
+              <line x1="140" y1="118" x2="140" y2="168"/>
+              <line x1="160" y1="118" x2="160" y2="168"/>
+              <line x1="180" y1="118" x2="180" y2="168"/>
+              <line x1="120" y1="133" x2="200" y2="133"/>
+              <line x1="120" y1="148" x2="200" y2="148"/>
+            </g>
+            <circle cx="167" cy="143" r="3.5" fill="#c83040" stroke="#761018" stroke-width="0.8"/>
+          </g>
+          <text x="204" y="122" fill="#666" font-size="10" font-family="Fraunces" font-style="italic">(u, v)</text>
+
+          <!-- Projection ray of THIS ball: the only ray drawn solid-red to highlight that
+               it is the specific point being mapped, distinguishing it from the frustum. -->
+          <line x1="160" y1="74" x2="160" y2="260" stroke="#b41e28" stroke-width="1.4" stroke-dasharray="4 3"/>
+        </svg>
+        <figcaption><span class="fig-num">Figure 1.</span> The overhead camera looks down at the plate; the projection ray maps a point on the plate surface to a pixel $(u, v)$ on the image plane. The estimation pipeline inverts that mapping, recovering plate-frame metric coordinates from $(u, v)$.</figcaption>
+      </figure>
+    </div>
+
+    <p>
+      The output of the pipeline is the ball state $(x, y, \dot x, \dot y) \in \{P\}$ in
+      metres and metres per second.
+    </p>
+
+    <h3 class="section-h"><span class="section-num">§ 2</span>Estimation pipeline</h3>
+    <p>
+      The image $\rightarrow$ ball-state mapping is a pipeline of four stages. The first
+      three turn a pixel into a metric position; the last fuses noisy positions into a
+      smooth state.
+    </p>
+
+    <div class="hardware-grid hardware-grid--2">
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <!-- checkerboard -->
+            <g transform="translate(30 25)">
+              <g fill="#0a1929">
+                <rect x="0"   y="0"   width="20" height="20"/>
+                <rect x="40"  y="0"   width="20" height="20"/>
+                <rect x="80"  y="0"   width="20" height="20"/>
+                <rect x="120" y="0"   width="20" height="20"/>
+                <rect x="160" y="0"   width="20" height="20"/>
+                <rect x="20"  y="20"  width="20" height="20"/>
+                <rect x="60"  y="20"  width="20" height="20"/>
+                <rect x="100" y="20"  width="20" height="20"/>
+                <rect x="140" y="20"  width="20" height="20"/>
+                <rect x="0"   y="40"  width="20" height="20"/>
+                <rect x="40"  y="40"  width="20" height="20"/>
+                <rect x="80"  y="40"  width="20" height="20"/>
+                <rect x="120" y="40"  width="20" height="20"/>
+                <rect x="160" y="40"  width="20" height="20"/>
+                <rect x="20"  y="60"  width="20" height="20"/>
+                <rect x="60"  y="60"  width="20" height="20"/>
+                <rect x="100" y="60"  width="20" height="20"/>
+                <rect x="140" y="60"  width="20" height="20"/>
+              </g>
+              <rect x="0" y="0" width="180" height="80" fill="none" stroke="#888" stroke-width="0.8"/>
+            </g>
+            <!-- camera looking at it (top) -->
+            <g transform="translate(95 120)">
+              <rect x="0" y="0" width="50" height="22" rx="3" fill="#2a2a2e" stroke="#0a0a0e" stroke-width="1"/>
+              <circle cx="14" cy="11" r="5" fill="#0c1f3a" stroke="#3a3a3e"/>
+              <circle cx="36" cy="11" r="5" fill="#0c1f3a" stroke="#3a3a3e"/>
+            </g>
+            <text x="120" y="160" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">offline · $\sim 20$ poses</text>
+          </svg>
+        </div>
+        <h4>Intrinsic calibration</h4>
+        <div class="hw-spec">checkerboard $\rightarrow$ $(K,\, d)$</div>
+        <p>
+          A checkerboard photographed in many poses fixes the focal lengths,
+          principal point, and lens distortion. Cached and applied to every
+          runtime frame to rectify it back to an ideal pinhole image.
+        </p>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 280 200" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <marker id="hgA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+              </marker>
+            </defs>
+
+            <!-- LEFT: image-plane view (plate as a parallelogram in perspective) -->
+            <path d="M 14 60 L 96 42 L 108 138 L 26 152 Z" fill="#fef9ed" stroke="#a48246" stroke-width="1.4"/>
+            <!-- 4 ArUco markers as perspective-foreshortened quads, numbered 1–4. -->
+            <g fill="#0a1929">
+              <path d="M 22 64 L 38 60 L 41 76 L 25 80 Z"/>
+              <path d="M 80 51 L 96 47 L 100 63 L 84 67 Z"/>
+              <path d="M 30 132 L 46 128 L 49 144 L 33 148 Z"/>
+              <path d="M 88 119 L 104 115 L 108 131 L 92 135 Z"/>
+            </g>
+            <g font-family="Fraunces" font-size="9" font-weight="700" fill="#fff" text-anchor="middle">
+              <text x="32" y="74">1</text>
+              <text x="90" y="61">2</text>
+              <text x="40" y="142">3</text>
+              <text x="98" y="129">4</text>
+            </g>
+            <text x="61" y="178" text-anchor="middle" font-family="Fraunces" font-size="11" fill="#666">image pixels</text>
+            <text x="61" y="190" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#888">(u, v)</text>
+
+            <!-- MIDDLE: H arrow, well clear of both plates -->
+            <line x1="118" y1="100" x2="160" y2="100" stroke="#003262" stroke-width="2.4" marker-end="url(#hgA)"/>
+            <text x="139" y="92" text-anchor="middle" fill="#003262" font-family="Fraunces" font-style="italic" font-size="15" font-weight="700">H</text>
+            <text x="139" y="115" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="9" font-style="italic">homography</text>
+
+            <!-- RIGHT: rectified plate (top-down, square) -->
+            <rect x="170" y="50" width="100" height="100" fill="#fef9ed" stroke="#a48246" stroke-width="1.5"/>
+            <g fill="#0a1929">
+              <rect x="176" y="56" width="14" height="14"/>
+              <rect x="250" y="56" width="14" height="14"/>
+              <rect x="176" y="130" width="14" height="14"/>
+              <rect x="250" y="130" width="14" height="14"/>
+            </g>
+            <g font-family="Fraunces" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">
+              <text x="183" y="67">1</text>
+              <text x="257" y="67">2</text>
+              <text x="183" y="141">3</text>
+              <text x="257" y="141">4</text>
+            </g>
+            <circle cx="220" cy="100" r="2.5" fill="#003262"/>
+            <text x="220" y="178" text-anchor="middle" font-family="Fraunces" font-size="11" fill="#666">plate metres</text>
+            <text x="220" y="190" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#888">(x, y)</text>
+          </svg>
+        </div>
+        <h4>Homography from ArUco</h4>
+        <div class="hw-spec">$(u, v) \rightarrow (x, y)$ on the plate</div>
+        <p>
+          Four ArUco fiducials at the plate corners give eight point correspondences.
+          The Direct Linear Transform fits a $3 \times 3$ matrix $H$ that maps any
+          pixel on the plate back to plate-frame metres.
+        </p>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <!-- hue ring -->
+            <defs>
+              <radialGradient id="hsv-ring" cx="50%" cy="50%" r="50%">
+                <stop offset="55%" stop-color="white" stop-opacity="0"/>
+                <stop offset="60%" stop-color="white" stop-opacity="1"/>
+                <stop offset="100%" stop-color="white" stop-opacity="1"/>
+              </radialGradient>
+            </defs>
+            <g transform="translate(50 90)">
+              <foreignObject x="-50" y="-50" width="100" height="100" style="overflow:visible">
+                <div xmlns="http://www.w3.org/1999/xhtml" style="width:100px;height:100px;border-radius:50%;background:conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red);"></div>
+              </foreignObject>
+              <circle cx="0" cy="0" r="32" fill="#fef9ed"/>
+            </g>
+            <!-- highlighted orange wedge for ball range -->
+            <path d="M 50 90 L 88 60 A 50 50 0 0 1 95 75 Z" fill="#e26b4a" stroke="#a14a25" stroke-width="1.4" opacity="0.85"/>
+            <text x="50" y="160" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">orange range</text>
+            <!-- arrow to detected ball -->
+            <line x1="115" y1="90" x2="155" y2="90" stroke="#003262" stroke-width="2" marker-end="url(#hsvA)"/>
+            <!-- detected ball on plate cropped -->
+            <g transform="translate(170 60)">
+              <rect x="0" y="0" width="50" height="60" fill="#fef9ed" stroke="#a48246" stroke-width="1.2" rx="2"/>
+              <circle cx="28" cy="35" r="8" fill="#e26b4a" stroke="#761018" stroke-width="1"/>
+              <circle cx="28" cy="35" r="10" fill="none" stroke="#288c5a" stroke-width="1.4" stroke-dasharray="3 2"/>
+            </g>
+            <text x="195" y="135" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">centroid $(u, v)$</text>
+            <defs>
+              <marker id="hsvA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <h4>HSV ball detection</h4>
+        <div class="hw-spec">image $\rightarrow$ pixel centroid $(u, v)$</div>
+        <p>
+          The orange ball is selected by an HSV colour range. After a morphological
+          clean-up, the largest circular blob's centroid in pixels is taken as the
+          ball; the homography $H$ converts it to plate-frame metres.
+        </p>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-figure">
+          <svg viewBox="0 0 240 180" preserveAspectRatio="xMidYMid meet">
+            <!-- noisy samples scattered around a smooth curve -->
+            <path d="M 30 130 C 60 100 100 80 140 70 S 200 45 215 35" fill="none" stroke="#003262" stroke-width="2.4"/>
+            <g fill="#c83040">
+              <circle cx="35"  cy="125" r="3"/>
+              <circle cx="55"  cy="118" r="3"/>
+              <circle cx="70"  cy="108" r="3"/>
+              <circle cx="88"  cy="95"  r="3"/>
+              <circle cx="105" cy="85"  r="3"/>
+              <circle cx="125" cy="75"  r="3"/>
+              <circle cx="145" cy="67"  r="3"/>
+              <circle cx="165" cy="55"  r="3"/>
+              <circle cx="185" cy="48"  r="3"/>
+              <circle cx="205" cy="40"  r="3"/>
+            </g>
+            <!-- arrows along the curve (velocity tangents) -->
+            <line x1="85" y1="100" x2="115" y2="78" stroke="#003262" stroke-width="1.6" marker-end="url(#kfA)"/>
+            <line x1="160" y1="60" x2="190" y2="44" stroke="#003262" stroke-width="1.6" marker-end="url(#kfA)"/>
+            <text x="120" y="160" text-anchor="middle" fill="#666" font-family="Fraunces" font-size="11" font-style="italic">noisy samples $\rightarrow$ smooth state</text>
+            <defs>
+              <marker id="kfA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+              </marker>
+            </defs>
+          </svg>
+        </div>
+        <h4>Kalman filter</h4>
+        <div class="hw-spec">$(x, y) \rightarrow (x, y, \dot x, \dot y)$</div>
+        <p>
+          A linear-Gaussian Kalman filter fuses the noisy per-frame positions into a
+          smooth state, using the commanded plate tilt as a known control input so
+          the velocity estimate anticipates the gravity component.
+        </p>
+      </div>
+
+    </div>
+
+    <h3 class="section-h"><span class="section-num">§ 3</span>Pinhole camera model and calibration</h3>
+    <p>
+      The camera is modelled as an ideal pinhole with intrinsic parameter matrix
+    </p>
+    <div class="math-block">
+      $$K = \begin{pmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{pmatrix} \in \mathbb{R}^{3 \times 3},$$
+    </div>
+    <p>
+      where $(f_x, f_y)$ are the focal lengths in pixels along the image axes and
+      $(c_x, c_y)$ is the principal point. For a 3-D point $X_C = (X, Y, Z)^\top$
+      expressed in $\{C\}$, the ideal projection onto the image plane is
+    </p>
+    <div class="math-block">
+      $$\lambda \begin{pmatrix} u \\ v \\ 1 \end{pmatrix} \;=\; K \begin{pmatrix} X \\ Y \\ Z \end{pmatrix}, \qquad \lambda = Z.$$
+    </div>
+    <p>
+      Real lenses introduce radial and tangential distortion. After normalising
+      $(x_n, y_n) = (X/Z, Y/Z)$, the distorted coordinates used to look up the pixel
+      colour are
+    </p>
+    <div class="math-block">
+      $$\begin{aligned} x_d &= x_n (1 + k_1 r^2 + k_2 r^4 + k_3 r^6) + 2 p_1 x_n y_n + p_2(r^2 + 2 x_n^2), \\ y_d &= y_n (1 + k_1 r^2 + k_2 r^4 + k_3 r^6) + p_1 (r^2 + 2 y_n^2) + 2 p_2 x_n y_n, \end{aligned}$$
+    </div>
+    <p>
+      where $r^2 = x_n^2 + y_n^2$. The five-element distortion vector is
+      $d = (k_1, k_2, p_1, p_2, k_3)$.
+    </p>
+    <p>
+      Calibration is performed offline by photographing an $8 \times 5$ inner-corner
+      checkerboard with a known $30$ mm square size in roughly twenty distinct poses.
+      For each detected pose with $N$ corner correspondences
+      $(X_j^{\text{world}}, u_j)$, the calibration solves
+    </p>
+    <div class="math-block">
+      $$\min_{K, d, \{R_i, t_i\}} \;\; \sum_i \sum_{j=1}^{N} \;\big\|\, u_j - \pi(K, d; R_i, t_i, X_j^{\text{world}}) \big\|^2,$$
+    </div>
+    <p>
+      where $\pi(\cdot)$ is the full distorted-pinhole projection and $(R_i, t_i)$ is the
+      pose of the checkerboard in image $i$. The minimisation is initialised from a
+      closed-form Direct Linear Transform (DLT) and refined by Levenberg-Marquardt; the
+      reported reprojection error is typically below $0.5$ pixels. The output of
+      calibration is the pair $(K, d)$, cached once and applied to every runtime
+      frame: each pixel is rectified by the inverse distortion mapping so that
+      downstream stages see a clean pinhole image.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 320" preserveAspectRatio="xMidYMid meet" style="margin: 0 auto;">
+        <defs>
+          <marker id="bA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+        </defs>
+
+        <!-- Top inputs -->
+        <g font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">
+          <text x="115" y="32" text-anchor="middle">3-D world points</text>
+          <text x="345" y="32" text-anchor="middle">2-D image points</text>
+        </g>
+
+        <!-- Arrows down to the solver block -->
+        <line x1="115" y1="44" x2="200" y2="96"  stroke="#003262" stroke-width="2" marker-end="url(#bA)"/>
+        <line x1="345" y1="44" x2="260" y2="96"  stroke="#003262" stroke-width="2" marker-end="url(#bA)"/>
+
+        <!-- Solver block -->
+        <rect x="135" y="100" width="190" height="44" rx="22" fill="#eaf3fb" stroke="#003262" stroke-width="1.5"/>
+        <text x="230" y="127" text-anchor="middle" font-family="Fraunces" font-size="13" fill="#003262">non-linear least-squares</text>
+
+        <!-- Arrows down to the two outputs -->
+        <line x1="180" y1="146" x2="160" y2="196" stroke="#003262" stroke-width="2" marker-end="url(#bA)"/>
+        <line x1="280" y1="146" x2="300" y2="196" stroke="#003262" stroke-width="2" marker-end="url(#bA)"/>
+
+        <!-- Outputs of calibration: K and d -->
+        <g font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">
+          <text x="115" y="214" text-anchor="middle">$K$ (intrinsics)</text>
+          <text x="345" y="214" text-anchor="middle">$d$ (distortion)</text>
+        </g>
+
+        <!-- Arrows down to the runtime block -->
+        <line x1="115" y1="224" x2="200" y2="264" stroke="#003262" stroke-width="2" marker-end="url(#bA)"/>
+        <line x1="345" y1="224" x2="260" y2="264" stroke="#003262" stroke-width="2" marker-end="url(#bA)"/>
+
+        <!-- Runtime undistort block (gold) -->
+        <rect x="160" y="268" width="140" height="40" rx="20" fill="#fef3da" stroke="#c4820e" stroke-width="1.5"/>
+        <text x="230" y="293" text-anchor="middle" font-family="Fraunces" font-size="13" fill="#c4820e">runtime undistort</text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 1.</span> Calibration pipeline. Checkerboard pose pairs are passed to non-linear least-squares with reprojection-error cost; the recovered $(K, d)$ are then used to rectify every runtime frame.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 4</span>Plane recovery via ArUco markers and homography</h3>
+    <p>
+      The plate's surface is a known plane. After undistortion, every undistorted pixel on
+      that plane is related to its plate-frame metric coordinates by a planar homography
+      $H \in \mathbb{R}^{3 \times 3}$: in homogeneous coordinates,
+    </p>
+    <div class="math-block">
+      $$\lambda \begin{pmatrix} x \\ y \\ 1 \end{pmatrix} \;=\; H \begin{pmatrix} u \\ v \\ 1 \end{pmatrix}, \qquad H = \begin{pmatrix} h_{11} & h_{12} & h_{13} \\ h_{21} & h_{22} & h_{23} \\ h_{31} & h_{32} & h_{33} \end{pmatrix}.$$
+    </div>
+    <p>
+      Each pixel-to-plate correspondence $(u_i, v_i) \leftrightarrow (x_i, y_i)$ contributes
+      two linear constraints in the eight free entries of $H$ (the matrix is defined up to
+      a scale). Four point correspondences are enough to determine $H$ uniquely up to that
+      scale; this is the Direct Linear Transform (DLT).
+    </p>
+    <p>
+      The four ArUco fiducial markers are placed at the plate corners, with centre
+      coordinates known a priori in $\{P\}$. A standard ArUco detector returns four image
+      corners per visible marker. During the first second of operation, while the plate is
+      stationary at home and all four markers are visible, each marker's image corners are
+      averaged over twenty frames and projected through a centroid-fit $H$ into $\{P\}$.
+      Once the four corners of all four markers are known in $\{P\}$, every visible marker
+      contributes four point correspondences, so a single visible marker is sufficient to
+      refit $H$ and the system tolerates partial occlusion.
+    </p>
+    <div class="callout">
+      <p>A full Perspective-n-Point (PnP) recovery of the plate's six-DOF pose in $\{C\}$
+      would also work, but the ball is constrained to move on the plate plane, so its
+      world position is a function only of $(u, v)$. The 2-D homography is faster to fit
+      and avoids estimating quantities that are not subsequently used.</p>
+    </div>
+
+    <h3 class="section-h"><span class="section-num">§ 5</span>Ball detection in HSV space</h3>
+    <p>
+      The undistorted BGR (Blue-Green-Red) frame is converted to the Hue-Saturation-Value
+      (HSV) representation. The orange ping-pong ball is selected by an HSV range threshold
+      tuned offline; a morphological opening removes speckle and a closing fills small
+      holes. Connected components are extracted; the component with the largest area
+      passing a circularity test is taken as the ball, and its centroid in pixel
+      coordinates is computed via the minimum enclosing circle. Application of $H$ from
+      § 4 yields the ball position $(x, y) \in \{P\}$ in metres.
+    </p>
+
+    <h3 class="section-h"><span class="section-num">§ 6</span>Velocity estimation: Kalman filter</h3>
+    <p>
+      Per-frame finite differences of $(x, y)$ are too noisy to feed into the controller:
+      the perception error at the camera scale is on the order of a few millimetres, which
+      becomes hundreds of millimetres per second after differentiation. A linear-Gaussian
+      Kalman filter (KF) is used instead.
+    </p>
+
+    <h4>5.1 &nbsp; State and dynamics</h4>
+    <p>
+      The state is the four-vector $X_t = (x_t, y_t, \dot x_t, \dot y_t)^\top$. The
+      process model is constant-velocity in the plate frame, with the in-plane component
+      of gravity entering as a known control input $u_t = (a_x, a_y)^\top$ derived from
+      the commanded plate tilt:
+    </p>
+    <div class="math-block">
+      $$X_{t+1} = F\, X_t + B\, u_t + w_t, \qquad w_t \sim \mathcal{N}(0, Q),$$
+    </div>
+    <p>
+      with the discrete-time matrices
+    </p>
+    <div class="math-block">
+      $$F = \begin{pmatrix} 1 & 0 & \Delta t & 0 \\ 0 & 1 & 0 & \Delta t \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1 \end{pmatrix}, \qquad B = \begin{pmatrix} \tfrac{1}{2}\Delta t^2 & 0 \\ 0 & \tfrac{1}{2}\Delta t^2 \\ \Delta t & 0 \\ 0 & \Delta t \end{pmatrix}.$$
+    </div>
+    <p>
+      The control input is the in-plane acceleration produced by gravity on the tilted
+      plate; from the rolling-without-slipping equation derived on the
+      <a href="physics.html">physics page</a>,
+    </p>
+    <div class="math-block">
+      $$a_x \;=\; +\alpha\, g\, \sin\theta_y, \qquad a_y \;=\; -\alpha\, g\, \sin\theta_x,$$
+    </div>
+    <p>
+      with $\alpha = 5/7$ for a uniform solid sphere. The plate tilt angles
+      $(\theta_x, \theta_y)$ are the commanded tilt from the controller — already
+      known when the predict step runs. Without this input the filter degrades
+      gracefully to a pure constant-velocity estimator; with it, the filter
+      anticipates the gravity-induced acceleration and reduces the lag on the
+      velocity estimate.
+    </p>
+
+    <h4>5.2 &nbsp; Measurement model</h4>
+    <p>
+      Only the position is measured directly:
+    </p>
+    <div class="math-block">
+      $$Y_t = C\, X_t + v_t, \qquad C = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \end{pmatrix}, \qquad v_t \sim \mathcal{N}(0, R),$$
+    </div>
+    <p>
+      with $R = \sigma_{\text{meas}}^2 I_2$.
+    </p>
+
+    <h4>5.3 &nbsp; Predict-update recursion</h4>
+    <p>
+      At every camera frame the filter performs the standard two-step update.
+      Let $\hat X_{t \mid t-1}$ denote the state estimate before the new measurement
+      and $P_{t \mid t-1}$ its covariance. The predict step propagates the estimate and
+      its uncertainty forward in time:
+    </p>
+    <div class="math-block">
+      $$\hat X_{t+1 \mid t} = F\, \hat X_{t \mid t} + B\, u_t, \qquad P_{t+1 \mid t} = F\, P_{t \mid t}\, F^\top + Q.$$
+    </div>
+    <p>
+      Once a new measurement $Y_t$ arrives, the update step computes the innovation, the
+      innovation covariance, the Kalman gain $K_t$, and the posterior estimate:
+    </p>
+    <div class="math-block">
+      $$\nu_t = Y_t - C\, \hat X_{t \mid t-1}, \quad S_t = C\, P_{t \mid t-1}\, C^\top + R, \quad K_t = P_{t \mid t-1}\, C^\top S_t^{-1},$$
+    </div>
+    <div class="math-block">
+      $$\hat X_{t \mid t} = \hat X_{t \mid t-1} + K_t\, \nu_t, \qquad P_{t \mid t} = (I - K_t\, C)\, P_{t \mid t-1}.$$
+    </div>
+    <p>
+      The process-noise covariance is the discrete-time continuous-white-noise-acceleration
+      form parametrised by a single standard deviation $\sigma_a$ on the unmodelled
+      acceleration:
+    </p>
+    <div class="math-block">
+      $$Q = \sigma_a^2 \begin{pmatrix} \tfrac{1}{4}\Delta t^4 & 0 & \tfrac{1}{2}\Delta t^3 & 0 \\ 0 & \tfrac{1}{4}\Delta t^4 & 0 & \tfrac{1}{2}\Delta t^3 \\ \tfrac{1}{2}\Delta t^3 & 0 & \Delta t^2 & 0 \\ 0 & \tfrac{1}{2}\Delta t^3 & 0 & \Delta t^2 \end{pmatrix}.$$
+    </div>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 620 280" preserveAspectRatio="xMidYMid meet" style="margin: 0 auto;">
+        <defs>
+          <marker id="kfArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+          <marker id="kfArrGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#888"/>
+          </marker>
+        </defs>
+
+        <!-- ===== LEFT: noisy measurements ===== -->
+        <g>
+          <rect x="20" y="50" width="180" height="160" fill="#fef9ed" stroke="#a48246" stroke-width="1.5" rx="8"/>
+          <text x="110" y="35" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#761018">noisy measurements</text>
+          <text x="110" y="232" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#761018">$Y_t = (x, y) + v_t$</text>
+          <!-- subtle trend line under the dots so the eye sees the underlying motion -->
+          <path d="M 35 175 C 70 155, 100 140, 130 120 S 175 80, 190 70" fill="none"
+                stroke="#c83040" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.45"/>
+          <!-- ten noisy samples scattered around the trend -->
+          <g fill="#c83040">
+            <circle cx="40"  cy="178" r="3"/>
+            <circle cx="58"  cy="166" r="3"/>
+            <circle cx="74"  cy="155" r="3"/>
+            <circle cx="90"  cy="140" r="3"/>
+            <circle cx="106" cy="129" r="3"/>
+            <circle cx="124" cy="118" r="3"/>
+            <circle cx="142" cy="103" r="3"/>
+            <circle cx="160" cy="92"  r="3"/>
+            <circle cx="176" cy="80"  r="3"/>
+            <circle cx="192" cy="68"  r="3"/>
+          </g>
+        </g>
+
+        <!-- arrow: measurements → KF -->
+        <line x1="208" y1="130" x2="248" y2="130" stroke="#003262" stroke-width="2" marker-end="url(#kfArr)"/>
+
+        <!-- ===== CENTRE: Kalman filter block ===== -->
+        <g>
+          <rect x="250" y="80" width="180" height="100" rx="10" fill="#eaf3fb" stroke="#003262" stroke-width="2"/>
+          <text x="340" y="108" text-anchor="middle" font-family="Fraunces" font-weight="700" font-size="14" fill="#003262">Kalman filter</text>
+          <line x1="270" y1="118" x2="410" y2="118" stroke="#003262" stroke-width="0.7" opacity="0.35"/>
+          <text x="340" y="140" text-anchor="middle" font-family="Fraunces" font-size="12" fill="#003262">predict</text>
+          <text x="340" y="158" text-anchor="middle" font-family="Fraunces" font-size="12" fill="#003262">+</text>
+          <text x="340" y="174" text-anchor="middle" font-family="Fraunces" font-size="12" fill="#003262">update</text>
+        </g>
+
+        <!-- control input u_t feeding in from below the KF block -->
+        <line x1="340" y1="248" x2="340" y2="184" stroke="#888" stroke-width="1.3" stroke-dasharray="3 2" marker-end="url(#kfArrGrey)"/>
+        <text x="340" y="263" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#666">$u_t$ — in-plane gravity from the commanded tilt</text>
+
+        <!-- arrow: KF → output -->
+        <line x1="432" y1="130" x2="472" y2="130" stroke="#003262" stroke-width="2" marker-end="url(#kfArr)"/>
+
+        <!-- ===== RIGHT: smoothed state ===== -->
+        <g>
+          <rect x="474" y="50" width="130" height="160" fill="#fef9ed" stroke="#a48246" stroke-width="1.5" rx="8"/>
+          <text x="539" y="35" text-anchor="middle" font-family="Fraunces" font-weight="600" font-size="13" fill="#003262">smoothed state</text>
+          <text x="539" y="232" text-anchor="middle" font-family="Fraunces" font-style="italic" font-size="11" fill="#003262">$\hat X_t = (x, y, \dot x, \dot y)$</text>
+          <!-- smooth path of the estimated trajectory -->
+          <path d="M 484 180 C 510 155, 525 130, 545 105 S 585 70, 598 60"
+                fill="none" stroke="#003262" stroke-width="2.4"/>
+          <!-- velocity tangent arrows at three points along the path -->
+          <line x1="500" y1="168" x2="514" y2="152" stroke="#003262" stroke-width="1.6" marker-end="url(#kfArr)"/>
+          <line x1="535" y1="120" x2="551" y2="100" stroke="#003262" stroke-width="1.6" marker-end="url(#kfArr)"/>
+          <line x1="570" y1="80"  x2="588" y2="65"  stroke="#003262" stroke-width="1.6" marker-end="url(#kfArr)"/>
+        </g>
+      </svg>
+      <figcaption><span class="fig-num">Figure 2.</span> Velocity estimation. The per-frame noisy positions (left) are fused by the linear-Gaussian Kalman filter (centre) into a smooth state with consistent velocity estimates (right, tangent arrows). The control input $u_t$ is the in-plane gravity computed from the commanded plate tilt; the filter uses it during the predict step so the velocity estimate anticipates the gravity-induced acceleration.</figcaption>
+    </figure>
+
+    <h3 class="section-h"><span class="section-num">§ 7</span>Output</h3>
+    <p>
+      The four components $(x, y, \dot x, \dot y)$ from the Kalman estimate are the
+      perception output, produced once per camera frame and consumed by the
+      controller. Accompanying tracker-health flags (was the ball detected this
+      frame, is the tracking estimate still valid, how many ArUco markers were seen)
+      indicate when the estimate should be trusted.
+    </p>
+
+    <h3 class="section-h"><span class="section-num">§ 8</span>Notation</h3>
+    <dl class="notation-list">
+      <dt>$(u, v)$</dt><dd>pixel coordinates in the rectified image plane.</dd>
+      <dt>$\{C\}, \{P\}$</dt><dd>camera frame and plate frame.</dd>
+      <dt>$K \in \mathbb{R}^{3\times 3}$</dt><dd>camera intrinsic matrix.</dd>
+      <dt>$d = (k_1, k_2, p_1, p_2, k_3)$</dt><dd>radial-tangential distortion coefficients.</dd>
+      <dt>$H \in \mathbb{R}^{3\times 3}$</dt><dd>plate-plane homography (pixels to plate metres).</dd>
+      <dt>$X_t = (x, y, \dot x, \dot y)^\top$</dt><dd>Kalman state.</dd>
+      <dt>$F, B, C$</dt><dd>state-space matrices.</dd>
+      <dt>$Q, R$</dt><dd>process- and measurement-noise covariances.</dd>
+      <dt>$u_t = (a_x, a_y)^\top$</dt><dd>in-plane gravity input computed from the commanded plate tilt.</dd>
+      <dt>$\alpha = 5/7$</dt><dd>rolling factor for a uniform solid sphere.</dd>
+    </dl>
+
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 9</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F. J., Marín-Jiménez, M. J.</span> (2014).
+          <span class="bib-title">Automatic generation and detection of highly reliable fiducial markers under occlusion</span>.
+          <span class="bib-venue">Pattern Recognition, 47(6), 2280–2292</span>.
+          <a class="bib-link" href="https://doi.org/10.1016/j.patcog.2014.01.005" target="_blank" rel="noopener">doi.org/10.1016/j.patcog.2014.01.005</a>
+        </li>
+        <li>
+          <span class="bib-authors">Romero-Ramirez, F. J., Muñoz-Salinas, R., Medina-Carnicer, R.</span> (2018).
+          <span class="bib-title">Speeded up detection of squared fiducial markers</span>.
+          <span class="bib-venue">Image and Vision Computing, 76, 38–47</span>.
+          <a class="bib-link" href="https://doi.org/10.1016/j.imavis.2018.05.004" target="_blank" rel="noopener">doi.org/10.1016/j.imavis.2018.05.004</a>
+        </li>
+        <li>
+          <span class="bib-authors">Zhang, Z.</span> (2000).
+          <span class="bib-title">A flexible new technique for camera calibration</span>.
+          <span class="bib-venue">IEEE Transactions on Pattern Analysis and Machine Intelligence, 22(11), 1330–1334</span>.
+          <a class="bib-link" href="https://doi.org/10.1109/34.888718" target="_blank" rel="noopener">doi.org/10.1109/34.888718</a>
+        </li>
+        <li>
+          <span class="bib-authors">Hartley, R., Zisserman, A.</span> (2004).
+          <span class="bib-title">Multiple View Geometry in Computer Vision</span> (2nd ed.).
+          <span class="bib-venue">Cambridge University Press</span>.
+          <a class="bib-link" href="https://www.robots.ox.ac.uk/~vgg/hzbook/" target="_blank" rel="noopener">robots.ox.ac.uk/~vgg/hzbook</a>
+        </li>
+        <li>
+          <span class="bib-authors">Kalman, R. E.</span> (1960).
+          <span class="bib-title">A new approach to linear filtering and prediction problems</span>.
+          <span class="bib-venue">Transactions of the ASME — Journal of Basic Engineering, 82(D), 35–45</span>.
+          <a class="bib-link" href="https://doi.org/10.1115/1.3662552" target="_blank" rel="noopener">doi.org/10.1115/1.3662552</a>
+        </li>
+        <li>
+          <span class="bib-authors">Bradski, G.</span> (2000).
+          <span class="bib-title">The OpenCV Library</span>.
+          <span class="bib-venue">Dr. Dobb's Journal of Software Tools, 25(11), 120–125</span>.
+          <a class="bib-link" href="https://github.com/opencv/opencv/wiki/CiteOpenCV" target="_blank" rel="noopener">github.com/opencv/opencv/wiki/CiteOpenCV</a>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

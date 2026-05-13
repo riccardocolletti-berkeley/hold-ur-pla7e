@@ -1,0 +1,26 @@
+# =============================================================================
+# Trajectory designer server settings. Plate / ball / physics constants
+# are loaded separately from `config/hardware.yaml`.
+# =============================================================================
+
+server:
+  port: 5050                       # Flask listen port
+  default_backend: sim             # one of: sim | real
+
+canvas:
+  safe_inset_frac: 0.10            # no-draw border on each side (10% per edge)
+  edge_margin_m:   0.01            # extra metres subtracted from the plate half-extent
+
+processing:
+  smooth_sigma:  1.5               # Gaussian smoothing kernel on the raw stroke (samples)
+  n_resample:    200               # output points per saved drawing
+
+# Where the real-robot launcher stages drawn trajectories so the controller
+# can pick them up at startup. The path is relative to the monorepo root.
+# ``ros_launch_commands`` maps the controller selected in the UI to the
+# actual ``ros2 launch`` command (PID and MPC have separate launch files).
+real:
+  drawing_target_dir: "real/ros2_ws/src/ball_balance_controller/runtime"
+  ros_launch_commands:
+    pid: "ros2 launch ball_balance_controller balance.launch.py"
+    mpc: "ros2 launch ball_balance_controller mpc_balance.launch.py"

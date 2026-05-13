@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PID controller · Hold UR Pla7e</title>
+  <meta name="description" content="PID controller for the ball-on-plate testbed: one decoupled loop per plate axis, routed through inverse kinematics to the UR7e wrist joints." />
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}]});"></script>
+</head>
+<body>
+
+  <div id="site-nav"></div>
+
+  <header class="page-hero">
+    <div class="container">
+      <p class="eyebrow">Control · PID</p>
+      <h1>PID controller</h1>
+      <p class="lead">
+        A pair of PID loops, one per plate axis, that map the tracking error to a
+        scalar tilt command and route it through wiring, inverse kinematics and
+        smoothing to a joint trajectory for the arm.
+      </p>
+    </div>
+  </header>
+
+  <section class="container container-narrow body-prose">
+
+    <h3 id="sec-inputs" class="section-h"><span class="section-num">§ 1</span>Inputs and reference frames</h3>
+    <p>
+      Two right-handed Cartesian frames are used: the world frame $\{W\}$ at the UR7e
+      base and the plate frame $\{P\}$ at the geometric centre of the plate. The ball
+      state $X = (x, y, \dot x, \dot y)$ and the reference trajectory
+      $r(t) = (x_r, y_r, \dot x_r, \dot y_r)$ are both expressed in $\{P\}$, in metres
+      and metres per second. Two errors are derived from them and consumed by the
+      controller:
+    </p>
+    <div class="math-block">
+      $$e_p = \begin{pmatrix} x - x_r \\ y - y_r \end{pmatrix}, \qquad e_v = \begin{pmatrix} \dot x - \dot x_r \\ \dot y - \dot y_r \end{pmatrix}.$$
+    </div>
+    <p>
+      The relative orientation of the two frames is encoded in a rotation matrix
+      $R_{WP}(q) \in SO(3)$, with components of a vector $v$ transforming as
+      $v^{W} = R_{WP}(q)\, v^{P}$. The inverse mapping is
+      $R_{PW}(q) = R_{WP}(q)^{\top}$.
+    </p>
+    <p>
+      In general, the pose of the plate frame in the world frame is a homogeneous
+      transform
+    </p>
+    <div class="math-block">
+      $$g_{WP}(q) \;=\; \begin{pmatrix} R_{WP}(q) & t(q) \\ 0 & 1 \end{pmatrix}
+        \;\in\; SE(3),
+        \qquad R_{WP}(q) \in SO(3), \; t(q) \in \mathbb{R}^{3},$$
+    </div>
+    <p>
+      and a full plate-pose controller would have to regulate both the rotation
+      $R_{WP}(q)$ and the translation $t(q)$ as functions of the six joints
+      $q \in \mathbb{R}^6$.
+    </p>
+    <p>
+      In the deployed setup (see <a href="#sec-ik">§ 5</a>) the upper-arm joints
+      $q_1, q_2, q_3$ are held at their home values, so the plate centre is fixed in
+      $\{W\}$ throughout operation and the translation
+    </p>
+    <div class="math-block">
+      $$t(q) \;\equiv\; t(q_{\text{home}}) \;=\; \text{const}$$
+    </div>
+    <p>
+      drops out of the control problem. The task reduces to tracking only the
+      rotation $R_{WP}(q) \in SO(3)$. Its first two columns are the world-frame
+      coordinates of the plate's local axes $\hat x_P, \hat y_P$, and feed the
+      wiring stage below.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 420 360" style="margin: 0 auto;">
+        <defs>
+          <marker id="xA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+          <marker id="redA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#b41e28"/>
+          </marker>
+        </defs>
+        <!-- plate (top-down) -->
+        <rect x="40" y="40" width="340" height="280" fill="#fef9ed" stroke="#a48246" stroke-width="2" rx="6"/>
+        <!-- 4 ArUco corners -->
+        <rect x="50"  y="50"  width="22" height="22" fill="#0a1929"/>
+        <rect x="348" y="50"  width="22" height="22" fill="#0a1929"/>
+        <rect x="50"  y="298" width="22" height="22" fill="#0a1929"/>
+        <rect x="348" y="298" width="22" height="22" fill="#0a1929"/>
+        <!-- plate frame at centre -->
+        <line x1="210" y1="180" x2="320" y2="180" stroke="#003262" stroke-width="3" marker-end="url(#xA)"/>
+        <text x="328" y="184" fill="#003262" font-size="14" font-style="italic">x̂<tspan dy="3" font-size="10">P</tspan></text>
+        <line x1="210" y1="180" x2="210" y2="70" stroke="#003262" stroke-width="3" marker-end="url(#xA)"/>
+        <text x="216" y="64" fill="#003262" font-size="14" font-style="italic">ŷ<tspan dy="3" font-size="10">P</tspan></text>
+        <circle cx="210" cy="180" r="6" fill="#003262"/>
+        <circle cx="210" cy="180" r="2.5" fill="#fdb515"/>
+        <text x="195" y="200" fill="#003262" font-size="11" font-style="italic">{P}</text>
+        <!-- target (green crosshair) -- top-left -->
+        <g stroke="#288c5a" stroke-width="2" fill="none">
+          <circle cx="120" cy="115" r="10"/>
+          <line x1="106" y1="115" x2="134" y2="115"/>
+          <line x1="120" y1="101" x2="120" y2="129"/>
+        </g>
+        <text x="85" y="100" fill="#288c5a" font-size="11" font-style="italic">target (x<tspan dy="2" font-size="8">r</tspan><tspan dy="-2" font-size="11">, y</tspan><tspan dy="2" font-size="8">r</tspan><tspan dy="-2" font-size="11">)</tspan></text>
+        <!-- ball -- lower-left -->
+        <circle cx="180" cy="245" r="14" fill="#c83040" stroke="#761018" stroke-width="1.5"/>
+        <text x="198" y="270" fill="#761018" font-size="11" font-style="italic">ball (x, y)</text>
+        <!-- error vector from ball to target -->
+        <line x1="180" y1="245" x2="120" y2="115" stroke="#b41e28" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#redA)"/>
+        <text x="160" y="190" fill="#b41e28" font-size="12" font-style="italic" font-weight="600">−e<tspan dy="3" font-size="9">p</tspan></text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 1.</span> Plate frame $\{P\}$ seen from the overhead camera. Origin at the plate centre, $\hat x_P$ to the right, $\hat y_P$ up. The four corners carry the ArUco fiducials. The ball position is $(x, y)$; the target is $(x_r, y_r)$. The arrow from ball to target is the negative position error $-e_p$.</figcaption>
+    </figure>
+
+    <h3 id="sec-law" class="section-h"><span class="section-num">§ 2</span>PID law</h3>
+    <p>
+      The PID block takes the tracking error and emits a pair of scalar tilt angles in
+      radians,
+    </p>
+    <div class="math-block">
+      $$(u_x, u_y) \;\in\; \mathbb{R}^2,$$
+    </div>
+    <p>
+      where $u_x$ is the desired tilt of the plate about the local $\hat y_P$ axis and
+      $u_y$ is the desired tilt about $\hat x_P$. The sign convention is fixed by the
+      rolling-without-slipping equation derived on the
+      <a href="physics.html">physics page</a>: $u_x > 0$ corresponds to a tilt that
+      drives the ball toward $-\hat x_P$.
+    </p>
+    <p>
+      One scalar PID controller is instantiated per plate axis. The two run independently
+      with shared gains. Each consumes the tracking error along its axis and emits the
+      corresponding tilt angle:
+    </p>
+    <div class="math-block">
+      $$u_x \;=\; K_p\, e_x \;+\; K_i \int_0^t e_x(\tau)\, d\tau \;+\; K_d\, \dot e_x.$$
+    </div>
+    <p>
+      The integrator state is anti-windup-clamped to a symmetric bound and the output is
+      clipped to a maximum tilt amplitude. The deployed gains were tuned by hand on the
+      live arm.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 580 250" preserveAspectRatio="xMidYMid meet" style="margin: 0 auto;">
+        <defs>
+          <marker id="blueAA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/>
+          </marker>
+        </defs>
+
+        <!-- ============ INPUT side ============ -->
+        <text x="8" y="36" font-family="JetBrains Mono" font-size="9" letter-spacing="0.05em" fill="#888">INPUT</text>
+        <text x="8" y="84" font-family="Fraunces" font-style="italic" font-size="13" fill="#003262">x<tspan dy="3" font-size="9">r</tspan></text>
+        <text x="8" y="148" font-family="Fraunces" font-style="italic" font-size="13" fill="#003262">x</text>
+        <line x1="36" y1="80" x2="76" y2="106" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+        <line x1="36" y1="144" x2="76" y2="124" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+
+        <!-- Subtractor: + marks the input added (top arrow, x_r), − marks the
+             subtracted input (bottom arrow, x). Labels sit inside the circle near
+             the corresponding entry point. -->
+        <circle cx="90" cy="115" r="15" fill="#fff" stroke="#003262" stroke-width="1.8"/>
+        <text x="82" y="110" text-anchor="middle" font-family="Fraunces" font-size="12" font-weight="700" fill="#288c5a">+</text>
+        <text x="82" y="125" text-anchor="middle" font-family="Fraunces" font-size="14" font-weight="700" fill="#b41e28">−</text>
+
+        <!-- error e flowing right with bus -->
+        <line x1="105" y1="115" x2="175" y2="115" stroke="#003262" stroke-width="2"/>
+        <text x="135" y="106" font-family="Fraunces" font-style="italic" font-size="13" fill="#003262">e</text>
+        <line x1="175" y1="55" x2="175" y2="175" stroke="#003262" stroke-width="2"/>
+        <circle cx="175" cy="115" r="3" fill="#003262"/>
+
+        <!-- ============ P branch (green) ============ -->
+        <line x1="175" y1="55" x2="225" y2="55" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+        <rect x="225" y="38" width="64" height="34" rx="6" fill="rgba(40,140,90,0.12)" stroke="#288c5a" stroke-width="1.5"/>
+        <text x="257" y="60" text-anchor="middle" font-family="Fraunces" font-size="14" font-weight="700" font-style="italic" fill="#288c5a">K<tspan dy="3" font-size="10">p</tspan></text>
+        <line x1="289" y1="55" x2="425" y2="55" stroke="#003262" stroke-width="2"/>
+        <line x1="425" y1="55" x2="425" y2="100" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+
+        <!-- ============ I branch (gold) ============ -->
+        <line x1="175" y1="115" x2="219" y2="115" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+        <rect x="219" y="98" width="52" height="34" rx="6" fill="#fff" stroke="#003262" stroke-width="1.5"/>
+        <text x="245" y="124" text-anchor="middle" font-family="Fraunces" font-size="20" font-weight="600" fill="#003262">∫</text>
+        <line x1="271" y1="115" x2="306" y2="115" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+        <rect x="306" y="98" width="64" height="34" rx="6" fill="rgba(196,130,14,0.12)" stroke="#c4820e" stroke-width="1.5"/>
+        <text x="338" y="120" text-anchor="middle" font-family="Fraunces" font-size="14" font-weight="700" font-style="italic" fill="#c4820e">K<tspan dy="3" font-size="10">i</tspan></text>
+        <line x1="370" y1="115" x2="425" y2="115" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+
+        <!-- ============ D branch (red) ============ -->
+        <line x1="175" y1="175" x2="219" y2="175" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+        <rect x="219" y="158" width="52" height="34" rx="6" fill="#fff" stroke="#003262" stroke-width="1.5"/>
+        <text x="245" y="180" text-anchor="middle" font-family="Fraunces" font-size="13" font-style="italic" fill="#003262">d⁄dt</text>
+        <line x1="271" y1="175" x2="306" y2="175" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+        <rect x="306" y="158" width="64" height="34" rx="6" fill="rgba(180,30,40,0.12)" stroke="#b41e28" stroke-width="1.5"/>
+        <text x="338" y="180" text-anchor="middle" font-family="Fraunces" font-size="14" font-weight="700" font-style="italic" fill="#b41e28">K<tspan dy="3" font-size="10">d</tspan></text>
+        <line x1="370" y1="175" x2="425" y2="175" stroke="#003262" stroke-width="2"/>
+        <line x1="425" y1="175" x2="425" y2="130" stroke="#003262" stroke-width="2" marker-end="url(#blueAA)"/>
+
+        <!-- ============ Output summer Σ ============ -->
+        <circle cx="440" cy="115" r="16" fill="#fff" stroke="#003262" stroke-width="2"/>
+        <text x="440" y="121" text-anchor="middle" font-family="Fraunces" font-size="22" font-weight="700" fill="#003262">Σ</text>
+
+        <!-- ============ OUTPUT side ============ -->
+        <line x1="456" y1="115" x2="540" y2="115" stroke="#003262" stroke-width="2.6" marker-end="url(#blueAA)"/>
+        <text x="546" y="119" font-family="Fraunces" font-size="14" font-weight="600" font-style="italic" fill="#003262">u<tspan dy="3" font-size="10">x</tspan></text>
+        <text x="546" y="34" font-family="JetBrains Mono" font-size="9" letter-spacing="0.05em" fill="#888" text-anchor="end">OUTPUT</text>
+
+        <text x="290" y="228" text-anchor="middle" font-family="Fraunces" font-size="10" font-style="italic" fill="#888">identical block per axis (x → u<tspan dy="2" font-size="8">x</tspan><tspan dy="-2" font-size="10">, y → u</tspan><tspan dy="2" font-size="8">y</tspan><tspan dy="-2" font-size="10">)</tspan></text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 2.</span> PID block diagram for the $x$-axis. The setpoint $x_r$ and the measurement $x$ enter a subtractor that forms the error $e = x_r - x$. The error feeds three parallel branches: proportional ($K_p$), integral ($K_i \int e\,dt$) and derivative ($K_d \, \dot e$). The three branch outputs are summed (Σ) to produce the tilt command $u_x$. The $y$-axis controller is identical.</figcaption>
+    </figure>
+
+    <h3 id="sec-wiring" class="section-h"><span class="section-num">§ 3</span>Wiring: scalars to a world-frame rotation</h3>
+    <p>
+      The scalars $(u_x, u_y)$ are tilt angles about the plate's local axes
+      $\hat x_P, \hat y_P$. The downstream inverse-kinematics step needs the
+      corresponding rotation 3-vector expressed in the world frame $\{W\}$, because
+      the manipulator Jacobian maps joint motion to world-frame plate rotations.
+      The wiring stage performs that change of basis.
+    </p>
+    <p>
+      Writing $\hat x_P^{\,W}(q)$ for the plate's local $\hat x_P$ axis with its
+      components expressed in $\{W\}$,
+    </p>
+    <div class="math-block">
+      $$\hat x_P^{\,W}(q) \;=\; R_{WP}(q)\, \hat e_x, \qquad
+        \hat y_P^{\,W}(q) \;=\; R_{WP}(q)\, \hat e_y,$$
+    </div>
+    <p>
+      where $\hat e_x = (1,0,0)^{\top}, \hat e_y = (0,1,0)^{\top}$, the two vectors
+      $\hat x_P^{\,W}(q)$ and $\hat y_P^{\,W}(q)$ are the first two columns of
+      $R_{WP}(q)$.
+    </p>
+    <p>
+      For a small angle $\alpha$, a rotation by $\alpha$ about a unit axis $\hat n$
+      is represented in axis-angle form by the 3-vector $\alpha \hat n$. Stacking
+      the two scalar tilts, the target rotation in $\{W\}$ is
+    </p>
+    <div class="math-block">
+      $$\theta_{\text{tar}} \;=\; u_y\, \hat x_P^{\,W}(q) \;-\; u_x\, \hat y_P^{\,W}(q) \;\in\; \mathbb{R}^{3}.$$
+    </div>
+    <p>
+      The minus sign on the $u_x$ term comes from the rolling-equation convention
+      fixed on the <a href="physics.html">physics page</a>: $u_x > 0$ must drive the
+      ball toward $-\hat x_P$, which corresponds to a rotation about $-\hat y_P$.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 300" preserveAspectRatio="xMidYMid meet" style="margin: 0 auto;">
+        <defs>
+          <pattern id="wireHatch" patternUnits="userSpaceOnUse" width="8" height="8">
+            <line x1="0" y1="8" x2="8" y2="0" stroke="#aaa" stroke-width="0.8"/>
+          </pattern>
+          <marker id="bA1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4820e"/>
+          </marker>
+        </defs>
+
+        <!-- Ground with hatching far below -->
+        <line x1="20" y1="260" x2="440" y2="260" stroke="#aaa" stroke-width="1"/>
+        <rect x="20" y="260" width="420" height="20" fill="url(#wireHatch)"/>
+
+        <!-- World horizon (dashed) at pivot height -->
+        <line x1="40" y1="200" x2="370" y2="200" stroke="#bbb" stroke-width="1.4" stroke-dasharray="6 4"/>
+        <text x="378" y="204" fill="#888" font-size="11" font-family="Fraunces" font-style="italic">horizon</text>
+
+        <!-- Tilted plate (pivot at (230, 200)) -->
+        <g transform="rotate(-15 230 200)">
+          <rect x="100" y="194" width="260" height="12" fill="#dcc093" stroke="#a48246" stroke-width="1.8" rx="3"/>
+          <!-- ball resting tangent to the top surface -->
+          <circle cx="290" cy="180" r="14" fill="#c83040" stroke="#761018" stroke-width="1.4"/>
+          <line x1="290" y1="180" x2="298" y2="191" stroke="#fff" stroke-width="1.6"/>
+        </g>
+
+        <!-- Plate-axis arrow x̂_W(q): goes along the plate surface to the right,
+             drawn OUTSIDE the rotated group so the label stays upright. The
+             direction matches the plate's tilt ( −15° ): from pivot (230, 200)
+             toward (230 + 130·cos(−15°), 200 + 130·sin(−15°)) ≈ (355.6, 166.4). -->
+        <line x1="230" y1="200" x2="356" y2="166" stroke="#c4820e" stroke-width="2.4" marker-end="url(#bA1)"/>
+        <text x="362" y="166" fill="#c4820e" font-size="14" font-family="Fraunces" font-style="italic" font-weight="700">x̂<tspan dy="3" font-size="10">P</tspan><tspan dy="-5" font-size="10">W</tspan></text>
+
+        <!-- θ_y arc between horizon and plate-axis at the pivot -->
+        <path d="M 290 200 A 60 60 0 0 0 287.9 184.5" fill="none" stroke="#6643a0" stroke-width="2.4"/>
+        <text x="306" y="195" fill="#6643a0" font-size="15" font-family="Fraunces" font-weight="700" font-style="italic">θ<tspan dy="3" font-size="10">y</tspan></text>
+
+        <!-- Pivot dot + label -->
+        <circle cx="230" cy="200" r="3.5" fill="#222"/>
+        <text x="230" y="244" text-anchor="middle" fill="#777" font-size="11" font-family="Fraunces" font-style="italic">wrist (pivot)</text>
+        <line x1="230" y1="234" x2="230" y2="204" stroke="#bbb" stroke-width="1"/>
+
+        <!-- Caption labels at the top -->
+        <text x="230" y="44" text-anchor="middle" fill="#003262" font-size="14" font-family="Fraunces" font-weight="600">tilted plate</text>
+        <text x="230" y="62" text-anchor="middle" fill="#888" font-size="11" font-family="Fraunces" font-style="italic">rotated by θ<tspan dy="3" font-size="9">y</tspan><tspan dy="-3" font-size="11"> about the world ŷ</tspan><tspan dy="3" font-size="9">W</tspan><tspan dy="-3" font-size="11"> axis</tspan></text>
+      </svg>
+      <figcaption><span class="fig-num">Figure 3.</span> The plate is tilted by an angle $\theta_y$ about the world's $\hat y_W$ axis. The vector $\hat x_P^{\,W}(q)$ is the plate's local $\hat x_P$ axis expressed in world coordinates at the current configuration $q$, i.e. the first column of $R_{WP}(q)$, pointing along the slope in $\{W\}$.</figcaption>
+    </figure>
+
+    <h3 id="sec-increment" class="section-h"><span class="section-num">§ 4</span>Rotation increment</h3>
+    <p>
+      The next stage is the inverse kinematics, where the rotational Jacobian
+      $J_r(q) \in \mathbb{R}^{3 \times 6}$ relates joint displacements $\Delta q$ to plate
+      rotations: in the small-displacement regime,
+      $J_r(q)\, \Delta q \approx \Delta\theta$. This relation is a first-order Taylor
+      expansion around $q$ and is accurate only when $\Delta\theta$ is genuinely small.
+      Feeding the IK an absolute target rotation produces large residual joint motion
+      and breaks the linearisation as soon as the plate is no longer near home.
+    </p>
+    <p>
+      To avoid this, the current plate rotation $\theta_{\text{cur}}$ is read from the
+      transform tree (encoding the current $R_{WP}(q)$ in axis-angle form) and subtracted
+      from the absolute target:
+    </p>
+    <div class="math-block">
+      $$\Delta\theta \;=\; \theta_{\text{tar}} \;-\; \theta_{\text{cur}}.$$
+    </div>
+    <p>
+      The IK then solves for the joint displacement that produces $\Delta\theta$, not
+      $\theta_{\text{tar}}$; the linearisation is exercised only on small residuals.
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 260" style="margin: 0 auto;">
+        <rect x="20"  y="30"  width="120" height="60" rx="10" fill="#eaf3fb" stroke="#003262" stroke-width="1.5"/>
+        <text x="80" y="58" text-anchor="middle" fill="#003262" font-weight="600" font-size="13">target</text>
+        <text x="80" y="78" text-anchor="middle" fill="#444" font-size="13" font-family="Fraunces" font-style="italic">θ<tspan dy="3" font-size="9">tar</tspan></text>
+        <rect x="20"  y="170" width="120" height="60" rx="10" fill="#eaf3fb" stroke="#003262" stroke-width="1.5"/>
+        <text x="80" y="198" text-anchor="middle" fill="#003262" font-weight="600" font-size="13">current</text>
+        <text x="80" y="218" text-anchor="middle" fill="#444" font-size="13" font-family="Fraunces" font-style="italic">θ<tspan dy="3" font-size="9">cur</tspan></text>
+        <circle cx="220" cy="130" r="22" fill="#fff" stroke="#b41e28" stroke-width="2"/>
+        <text x="220" y="138" text-anchor="middle" fill="#b41e28" font-size="22" font-weight="700">−</text>
+        <path d="M 142 60 C 175 60 200 100 198 110" fill="none" stroke="#003262" stroke-width="2" marker-end="url(#bA2)"/>
+        <path d="M 142 200 C 175 200 200 160 198 150" fill="none" stroke="#003262" stroke-width="2" marker-end="url(#bA2)"/>
+        <line x1="244" y1="130" x2="290" y2="130" stroke="#003262" stroke-width="2" marker-end="url(#bA2)"/>
+        <rect x="290" y="100" width="100" height="60" rx="10" fill="#fef3da" stroke="#c4820e" stroke-width="2"/>
+        <text x="340" y="128" text-anchor="middle" fill="#c4820e" font-weight="700" font-style="italic" font-size="14">Δθ</text>
+        <text x="340" y="146" text-anchor="middle" fill="#444" font-size="10" font-style="italic">to IK</text>
+        <defs><marker id="bA2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#003262"/></marker></defs>
+      </svg>
+      <figcaption><span class="fig-num">Figure 4.</span> Rotation increment. The absolute target $\theta_{\text{tar}}$ produced by the wiring stage and the current plate rotation $\theta_{\text{cur}}$ read from the transform tree are subtracted; the IK consumes the residual $\Delta\theta$.</figcaption>
+    </figure>
+
+    <h3 id="sec-ik" class="section-h"><span class="section-num">§ 5</span>Inverse kinematics</h3>
+    <p>
+      The geometric Jacobian of the manipulator decomposes into a positional block and a
+      rotational block:
+    </p>
+    <div class="math-block">
+      $$J(q) \;=\; \begin{pmatrix} J_p(q) \\ J_r(q) \end{pmatrix} \;\in\; \mathbb{R}^{6 \times 6}, \qquad J_p, J_r \in \mathbb{R}^{3 \times 6}.$$
+    </div>
+    <p>
+      $J_p$ relates joint velocities to the linear velocity of the wrist and is unused
+      here, because the position of the plate centre is fixed by the locked upper-arm
+      joints. $J_r$ relates joint velocities to the angular velocity of the plate; in
+      the small-displacement regime,
+      $J_r(q)\, \Delta q \approx \Delta\theta$.
+    </p>
+    <p>
+      The system has three equations and six unknowns and is therefore underdetermined.
+      With the upper-arm joints $q_1, q_2, q_3$ locked, the corresponding three columns
+      of $J_r$ are dropped; only the wrist columns contribute. The remaining
+      $3 \times 3$ subsystem is square and well-conditioned at the home configuration.
+      The minimum-norm solution is computed via the Moore-Penrose pseudoinverse:
+    </p>
+    <div class="math-block">
+      $$\Delta q \;=\; J_r(q)^{+} \, \Delta\theta.$$
+    </div>
+    <p>
+      In practice the pseudoinverse is computed via the SVD-based least-squares routine,
+      which is numerically stable when the wrist subsystem approaches singularity
+      (e.g. at gimbal-lock configurations).
+    </p>
+
+    <figure class="fig reveal-scale">
+      <svg class="diagram" viewBox="0 0 460 230" preserveAspectRatio="xMidYMid meet" style="margin: 0 auto;">
+        <g font-family="Fraunces" font-style="italic" font-size="13">
+          <text x="120" y="22" fill="#003262" text-anchor="middle">J<tspan dy="3" font-size="10">r</tspan><tspan dy="-3" font-size="13"> (3×6)</tspan></text>
+          <text x="270" y="22" fill="#444"   text-anchor="middle">Δq (6×1)</text>
+          <text x="343" y="22" fill="#c4820e" text-anchor="middle">Δθ (3×1)</text>
+        </g>
+        <!-- J_r matrix (3 rows × 6 cols) -->
+        <path d="M 33 65 L 26 65 L 26 165 L 33 165" stroke="#003262" stroke-width="1.6" fill="none"/>
+        <path d="M 223 65 L 230 65 L 230 165 L 223 165" stroke="#003262" stroke-width="1.6" fill="none"/>
+        <g fill="#d8d8d8" stroke="#aaa" stroke-width="1">
+          <rect x="38"  y="74"  width="28" height="28"/>
+          <rect x="68"  y="74"  width="28" height="28"/>
+          <rect x="98"  y="74"  width="28" height="28"/>
+          <rect x="38"  y="104" width="28" height="28"/>
+          <rect x="68"  y="104" width="28" height="28"/>
+          <rect x="98"  y="104" width="28" height="28"/>
+          <rect x="38"  y="134" width="28" height="28"/>
+          <rect x="68"  y="134" width="28" height="28"/>
+          <rect x="98"  y="134" width="28" height="28"/>
+        </g>
+        <g fill="#e8dcf5" stroke="#6643a0" stroke-width="1.2">
+          <rect x="130" y="74"  width="28" height="28"/>
+          <rect x="160" y="74"  width="28" height="28"/>
+          <rect x="190" y="74"  width="28" height="28"/>
+          <rect x="130" y="104" width="28" height="28"/>
+          <rect x="160" y="104" width="28" height="28"/>
+          <rect x="190" y="104" width="28" height="28"/>
+          <rect x="130" y="134" width="28" height="28"/>
+          <rect x="160" y="134" width="28" height="28"/>
+          <rect x="190" y="134" width="28" height="28"/>
+        </g>
+        <text x="237" y="121" font-family="Fraunces" font-size="26" fill="#003262" text-anchor="middle">·</text>
+        <!-- Δq vector (6 cells) -->
+        <path d="M 251 30 L 244 30 L 244 200 L 251 200" stroke="#003262" stroke-width="1.6" fill="none"/>
+        <path d="M 290 30 L 297 30 L 297 200 L 290 200" stroke="#003262" stroke-width="1.6" fill="none"/>
+        <g fill="#d8d8d8" stroke="#aaa" stroke-width="1">
+          <rect x="256" y="35"  width="28" height="22"/>
+          <rect x="256" y="59"  width="28" height="22"/>
+          <rect x="256" y="83"  width="28" height="22"/>
+        </g>
+        <g fill="#e8dcf5" stroke="#6643a0" stroke-width="1.2">
+          <rect x="256" y="113" width="28" height="22"/>
+          <rect x="256" y="137" width="28" height="22"/>
+          <rect x="256" y="161" width="28" height="22"/>
+        </g>
+        <g font-family="Fraunces" font-style="italic" font-size="13" fill="#888" text-anchor="middle">
+          <text x="270" y="52">0</text>
+          <text x="270" y="76">0</text>
+          <text x="270" y="100">0</text>
+        </g>
+        <text x="313" y="121" font-family="Fraunces" font-size="22" fill="#003262" text-anchor="middle">=</text>
+        <!-- Δθ vector (3 cells) -->
+        <path d="M 333 65 L 326 65 L 326 165 L 333 165" stroke="#c4820e" stroke-width="1.6" fill="none"/>
+        <path d="M 367 65 L 374 65 L 374 165 L 367 165" stroke="#c4820e" stroke-width="1.6" fill="none"/>
+        <g fill="#fef3da" stroke="#c4820e" stroke-width="1.2">
+          <rect x="338" y="74"  width="28" height="28"/>
+          <rect x="338" y="104" width="28" height="28"/>
+          <rect x="338" y="134" width="28" height="28"/>
+        </g>
+        <g font-family="JetBrains Mono" font-size="9.5" text-anchor="middle">
+          <text x="82"  y="186" fill="#888">locked</text>
+          <text x="82"  y="198" fill="#888">(zero)</text>
+          <text x="160" y="186" fill="#6643a0">wrist</text>
+          <text x="160" y="198" fill="#6643a0">(free)</text>
+        </g>
+      </svg>
+      <figcaption><span class="fig-num">Figure 5.</span> The rotational Jacobian $J_r$ acting on the full joint increment $\Delta q$ to produce the plate rotation increment $\Delta\theta$. Locked-joint entries of $\Delta q$ are zero by construction; only the wrist entries contribute, so the effective system is $3 \times 3$ on the wrist columns of $J_r$.</figcaption>
+    </figure>
+
+    <h3 id="sec-smoothing" class="section-h"><span class="section-num">§ 6</span>Smoothing and dispatch</h3>
+    <p>
+      The raw $\Delta q$ is clipped per-joint to a safe maximum tilt
+      $\Delta q_{\max}$ and then passed through a first-order low-pass filter to
+      attenuate high-frequency content that would excite the structural modes of the
+      arm:
+    </p>
+    <div class="math-block">
+      $$\Delta q_f^{(k+1)} \;=\; \alpha\, \Delta q^{(k+1)} \;+\; (1 - \alpha)\, \Delta q_f^{(k)}, \qquad \alpha \in (0, 1].$$
+    </div>
+    <p>
+      The filtered correction is added to the current configuration to produce the
+      target,
+    </p>
+    <div class="math-block">
+      $$q_{\text{tgt}} \;=\; q_{\text{cur}} \;+\; \Delta q_f,$$
+    </div>
+    <p>
+      which is published as a joint trajectory message at the controller rate. The
+      vendor's joint-space firmware takes over from there: it interpolates between
+      successive waypoints and runs an internal joint-level loop with gravity
+      compensation. This boundary is described in more detail on the
+      <a href="ros.html">ROS page</a>.
+    </p>
+
+    <h3 id="sec-notation" class="section-h"><span class="section-num">§ 7</span>Notation</h3>
+    <dl class="notation-list">
+      <dt>$e_p, e_v$</dt><dd>position and velocity tracking errors (defined on the setup page).</dd>
+      <dt>$u_x, u_y$</dt><dd>scalar tilt angles, output of the position-level controller.</dd>
+      <dt>$K_p, K_i, K_d$</dt><dd>PID gains.</dd>
+      <dt>$\beta = \alpha g$</dt><dd>plate-tilt gain in the rolling equation, $\alpha = 5/7$.</dd>
+      <dt>$R_{WP}(q) \in SO(3)$</dt><dd>rotation matrix that takes components in $\{P\}$ to components in $\{W\}$: $v^W = R_{WP}(q)\, v^P$.</dd>
+      <dt>$\hat x_P^{\,W}(q), \hat y_P^{\,W}(q)$</dt><dd>plate's local $\hat x_P, \hat y_P$ axes expressed in $\{W\}$: the first two columns of $R_{WP}(q)$.</dd>
+      <dt>$\theta_{\text{tar}}, \theta_{\text{cur}}, \Delta\theta \in \mathbb{R}^3$</dt><dd>target, current, and incremental plate rotation in axis-angle form.</dd>
+      <dt>$J(q), J_p(q), J_r(q)$</dt><dd>full geometric Jacobian and its positional and rotational blocks.</dd>
+      <dt>$\Delta q, \Delta q_f$</dt><dd>raw and low-pass-filtered joint displacement.</dd>
+      <dt>$q_{\text{cur}}, q_{\text{tgt}}$</dt><dd>current and target joint configurations.</dd>
+    </dl>
+
+  </section>
+
+  <section class="doc-section doc-section--alt">
+    <div class="container container-narrow body-prose">
+      <h3 class="section-h"><span class="section-num">§ 8</span>References</h3>
+      <ol class="bibliography">
+        <li>
+          <span class="bib-authors">Åström, K. J., Murray, R. M.</span> (2008).
+          <span class="bib-title">Feedback Systems: An Introduction for Scientists and Engineers</span>.
+          <span class="bib-venue">Princeton University Press</span>.
+          <a class="bib-link" href="https://fbswiki.org/" target="_blank" rel="noopener">fbswiki.org</a>
+        </li>
+        <li>
+          <span class="bib-authors">Åström, K. J., Hägglund, T.</span> (1995).
+          <span class="bib-title">PID Controllers: Theory, Design, and Tuning</span> (2nd ed.).
+          <span class="bib-venue">Instrument Society of America</span>.
+          <a class="bib-link" href="https://lup.lub.lu.se/search/publication/1aa6ddcb-00bd-4d86-92d2-b66d981c534f" target="_blank" rel="noopener">lup.lub.lu.se</a>
+        </li>
+        <li>
+          <span class="bib-authors">Ziegler, J. G., Nichols, N. B.</span> (1942).
+          <span class="bib-title">Optimum settings for automatic controllers</span>.
+          <span class="bib-venue">Transactions of the ASME, 64, 759–768</span>.
+          <a class="bib-link" href="https://doi.org/10.1115/1.4019264" target="_blank" rel="noopener">doi.org/10.1115/1.4019264</a>
+        </li>
+        <li>
+          <span class="bib-authors">Minorsky, N.</span> (1922).
+          <span class="bib-title">Directional stability of automatically steered bodies</span>.
+          <span class="bib-venue">Journal of the American Society of Naval Engineers, 34(2), 280–309</span>.
+          <a class="bib-link" href="https://doi.org/10.1111/j.1559-3584.1922.tb04958.x" target="_blank" rel="noopener">doi.org/10.1111/j.1559-3584.1922.tb04958.x</a>
+        </li>
+        <li>
+          <span class="bib-authors">Hauser, J., Sastry, S., Kokotović, P.</span> (1992).
+          <span class="bib-title">Nonlinear control via approximate input-output linearization: the ball and beam example</span>.
+          <span class="bib-venue">IEEE Transactions on Automatic Control, 37(3), 392–398</span>.
+          <a class="bib-link" href="https://people.eecs.berkeley.edu/~sastry/pubs/OldSastryALL/HauserBallandBeam1992.pdf" target="_blank" rel="noopener">eecs.berkeley.edu/~sastry</a>
+        </li>
+        <li>
+          <span class="bib-authors">Franklin, G. F., Powell, J. D., Emami-Naeini, A.</span> (2019).
+          <span class="bib-title">Feedback Control of Dynamic Systems</span> (8th ed.).
+          <span class="bib-venue">Pearson</span>.
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="site-footer"></div>
+
+  <script src="../assets/js/main.js"></script>
+</body>
+</html>

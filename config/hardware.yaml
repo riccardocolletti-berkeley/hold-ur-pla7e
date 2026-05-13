@@ -1,0 +1,36 @@
+# =============================================================================
+# Physical hardware spec, loaded by the simulator (sim/), the standalone
+# vision pipeline (real/vision/), and the ROS 2 controller
+# (real/ros2_ws/src/ball_balance_controller/) through
+# `ballplate.hardware.load`. SI units throughout: metres, kilograms,
+# seconds, radians.
+# =============================================================================
+
+plate:
+  size:      [0.457, 0.457]   # full edge lengths along plate (x, y) [m]
+  thickness: 0.00635          # plate slab full height [m]
+  mass:      0.68            # [kg]
+  friction:  0.5            # sliding-friction coefficient
+
+ball:
+  radius:    0.020          # [m]  (ITTF ping-pong: 40 mm diameter)
+  mass:      0.0027         # [kg] (ITTF regulation: 2.7 g)
+  friction:  0.5
+
+physics:
+  gravity:        9.81           # [m/s^2]
+  rolling_factor: 0.71428571     # 5/7 for a uniform solid sphere; 1.0 for sliding
+
+# Pose of the plate centre relative to the arm's last wrist link (tool0).
+# Used by the simulator (to attach the plate body in scene.py) and by the
+# real-robot launch file (to publish the static TF tool0 -> plate_center).
+adapter:
+  position:    [0.0, 0.0, 0.142]   # [m]   xyz offset from tool0 to plate centre
+  orientation: [0.0, 0.0, 1.5708]  # [rad] roll, pitch, yaw (XYZ-Euler) in tool0 frame
+
+# Real-arm-only settings; ignored by sim. The lab `enable_comms` bringup
+# sets the slider to 0.2 during boot and ramps to 1.0 once the robot
+# reaches RUNNING; we re-assert the desired value here when our balance
+# launch fires so motion commands aren't silently throttled.
+arm:
+  speed_slider_fraction: 1.0   # range [0.0, 1.0]; UR speed-slider override

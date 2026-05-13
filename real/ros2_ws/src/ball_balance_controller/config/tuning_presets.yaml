@@ -1,0 +1,42 @@
+# =============================================================================
+# Ball-balance controller tuning presets.
+#
+# Copy a block into `pid_params.yaml`, or load directly via the launch file:
+#   ros2 launch ball_balance_controller balance.launch.py \
+#     params_file:=$(ros2 pkg prefix ball_balance_controller)/share/ball_balance_controller/config/tuning_presets.yaml
+# =============================================================================
+
+presets:
+
+  conservative:
+    kp:           0.80
+    ki:           0.30
+    kd:           0.40
+    kff:          0.00
+    command_alpha: 0.50
+    max_tilt_rad:  0.040
+
+  aggressive:
+    kp:           1.60
+    ki:           0.60
+    kd:           0.60
+    kff:          0.20
+    command_alpha: 0.85
+    max_tilt_rad:  0.060
+
+  hold_centre:
+    reference_shape: "stationary"
+    kp:           1.20
+    ki:           0.30
+    kd:           0.40
+    kff:          0.00
+
+  circle_slow:
+    reference_shape:    "circle"
+    reference_radius_m: 0.030
+    reference_period_s: 30.0
+
+  circle_fast:
+    reference_shape:    "circle"
+    reference_radius_m: 0.015
+    reference_period_s: 10.0

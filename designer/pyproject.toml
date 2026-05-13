@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "designer"
+version = "0.1.0"
+description = "Browser-based trajectory designer for the ball-on-plate stack: draw a path, choose a backend (sim / real), and dispatch."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "ballplate",
+    "flask>=3.0",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "scipy>=1.10",
+]
+
+# Flat layout: the package lives directly under `designer/`. The exclude
+# list keeps the macOS .command shim, the user-editable yaml, the readme,
+# and the build manifest itself out of the wheel.
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+exclude = [
+    "/launch.command",
+    "/designer.yaml",
+    "/README.md",
+    "/pyproject.toml",
+]
+
+[tool.uv.sources]
+ballplate = { workspace = true }
