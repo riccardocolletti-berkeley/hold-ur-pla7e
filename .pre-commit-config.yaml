@@ -24,10 +24,10 @@ repos:
       - id: check-added-large-files
         # 1 MiB ceiling: catches accidental media commits while allowing
         # the bundled UR7e URDF (~50 KiB) and uv.lock (~500 KiB). The
-        # website ships short hardware demo clips that are intentionally
-        # in-tree; skip them here.
+        # website ships short hardware demo clips and the final slide
+        # deck PDF; both are intentionally in-tree, skip them here.
         args: ['--maxkb=1024']
-        exclude: '\.(mp4|webm|mov)$'
+        exclude: '\.(mp4|webm|mov|pdf)$'
       - id: mixed-line-ending
         args: ['--fix=lf']
 
